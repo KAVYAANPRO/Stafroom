@@ -32,10 +32,9 @@
   <div class="auth-err" id="err"></div>
 
   <form id="formLogin" style="display:flex;flex-direction:column;gap:10px;">
-    <div class="sr-field"><span class="label">Email</span><input type="email" id="loginEmail" required value="priya.sharma@email.com"></div>
-    <div class="sr-field"><span class="label">Password</span><input type="password" id="loginPassword" required value="Teach1234"></div>
+    <div class="sr-field"><span class="label">Email</span><input type="email" id="loginEmail" required autocomplete="email"></div>
+    <div class="sr-field"><span class="label">Password</span><input type="password" id="loginPassword" required autocomplete="current-password"></div>
     <button type="submit" class="sr-btn-primary" style="margin-top:4px;">Sign in</button>
-    <span class="auth-hint">Demo account is pre-filled — just hit Sign in.</span>
   </form>
 
   <form id="formRegister" style="display:none;flex-direction:column;gap:10px;">

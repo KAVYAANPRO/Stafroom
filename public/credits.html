@@ -194,7 +194,7 @@
     if (razorpayScriptPromise) return razorpayScriptPromise;
     razorpayScriptPromise = new Promise((resolve) => {
       const el = document.createElement('script');
-      el.src = 'https://checkout.razorpay.com/v2/checkout.js';
+      el.src = 'https://checkout.razorpay.com/v1/checkout.js';
       el.onload = () => resolve(typeof Razorpay !== 'undefined');
       el.onerror = () => resolve(false);
       // Belt-and-braces: some ad/privacy blockers let the <script> tag

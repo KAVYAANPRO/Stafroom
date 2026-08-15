@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Classes &amp; Subjects — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { main } = await mountShell('classes', 'Classes & Subjects');
+  main.classList.add('wide');
+  main.innerHTML = '<div class="sr-loading">Loading classes…</div>';
+
+  let classes = [];
+  const expanded = {};
+  let addFormOpen = false;
+  const draft = { board: 'CBSE', section: '', subject: '', students: '' };
+
+  async function load() {
+    const res = await api('/classes');
+    classes = res.classes;
+    render();
+  }
+
+  function render() {
+    main.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <h1 class="sr-title">Classes &amp; Subjects</h1>
+          <p class="sr-subtitle">Your teaching context — every paper, quiz and analysis pulls from here.</p>
+        </div>
+        <button id="btnAdd" class="sr-btn-primary" style="display:flex;align-items:center;gap:7px;"><span style="font-size:15px;">+</span><span>Add class</span></button>
+      </div>
+
+      ${addFormOpen ? `
+      <div class="sr-card" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;animation:rise .2s ease;">
+        <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">New class</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;">
+          <div class="sr-field"><span class="label">Board</span>
+            <select id="dBoard"><option ${draft.board==='CBSE'?'selected':''}>CBSE</option><option ${draft.board==='ICSE'?'selected':''}>ICSE</option><option ${draft.board==='GSEB'?'selected':''}>GSEB</option></select>
+          </div>
+          <div class="sr-field"><span class="label">Grade &amp; section</span><input type="text" id="dSection" placeholder="e.g. 8-C" value="${esc(draft.section)}"></div>
+          <div class="sr-field"><span class="label">Subject</span><input type="text" id="dSubject" placeholder="e.g. Mathematics" value="${esc(draft.subject)}"></div>
+          <div class="sr-field"><span class="label">Students</span><input type="text" id="dStudents" placeholder="e.g. 36" value="${esc(draft.students)}"></div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="btnCancelAdd" class="sr-btn-secondary">Cancel</button>
+          <button id="btnCreate" class="sr-btn-primary">Create class</button>
+        </div>
+      </div>` : ''}
+
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        ${classes.length ? classes.map(classRow).join('') : `<div class="sr-card" style="padding:24px;text-align:center;color:#8A8272;font-size:13.5px;">No classes yet — add your first one above.</div>`}
+      </div>
+    `;
+
+    document.getElementById('btnAdd').onclick = () => { addFormOpen = !addFormOpen; render(); };
+    const cancelBtn = document.getElementById('btnCancelAdd');
+    if (cancelBtn) cancelBtn.onclick = () => { addFormOpen = false; render(); };
+    const createBtn = document.getElementById('btnCreate');
+    if (createBtn) createBtn.onclick = onCreate;
+
+    main.querySelectorAll('[data-toggle]').forEach((el) => el.addEventListener('click', () => {
+      const key = el.dataset.toggle;
+      expanded[key] = !expanded[key];
+      render();
+    }));
+  }
+
+  function classRow(c) {
+    const isExp = !!expanded[c.id];
+    const trendColor = c.trend && c.trend.startsWith('+') ? '#6E8B6F' : c.trend && c.trend.startsWith('-') ? '#C1654B' : '#8A8272';
+    const keyFontSize = c.key.length > 5 ? '10px' : c.key.length > 3 ? '12.5px' : '15px';
+    return `
+    <div class="sr-card" style="overflow:hidden;">
+      <div data-toggle="${c.id}" style="display:flex;align-items:center;gap:16px;padding:18px 20px;cursor:pointer;">
+        <div style="width:44px;height:44px;border-radius:10px;background:#EFEADD;color:#0F4C4F;font-family:'Source Serif 4',serif;font-size:${keyFontSize};font-weight:700;line-height:1.1;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;padding:2px;flex-shrink:0;">${esc(c.key)}</div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
+          <span style="font-size:15px;font-weight:600;color:#2B2B2B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.board)} · Class ${esc(c.grade)} · ${esc(c.subject)}</span>
+          <span style="font-size:12.5px;color:#8A8272;">${c.students} students · Syllabus ${esc(c.syllabus)}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+          <span style="font-size:14px;font-weight:600;color:${trendColor};">${c.avg || '—'} avg${c.trend ? ' · ' + c.trend : ''}</span>
+          <span style="font-size:12px;color:#8A8272;">${c.next ? esc(c.next) : 'No assessments yet'}</span>
+        </div>
+        ${c.hasWeak ? `<span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;background:#F7E9E4;color:#A2593F;flex-shrink:0;">${esc(c.weakTop)}</span>` : ''}
+        <span style="font-size:12px;color:#8A8272;flex-shrink:0;">${isExp ? '▲' : '▼'}</span>
+      </div>
+      ${isExp ? `
+      <div style="border-top:1px solid #E4DECD;padding:16px 20px 20px 20px;display:flex;flex-direction:column;gap:16px;animation:rise .2s ease;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">RECENT ASSESSMENTS</span>
+            ${c.recent.length ? c.recent.map((r) => `<div style="display:flex;justify-content:space-between;font-size:13px;color:#2B2B2B;"><span>${esc(r.title)}</span><span style="color:#8A8272;">${esc(r.status)}</span></div>`).join('') : '<span style="font-size:13px;color:#8A8272;">None yet.</span>'}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">TEACHING PREFERENCES</span>
+            <span style="font-size:13px;color:#2B2B2B;">Medium: ${esc(c.medium)}</span>
+            <span style="font-size:13px;color:#2B2B2B;">Default mix: ${esc(c.mix)}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <a href="analytics.html?class=${c.id}" class="sr-btn-secondary" style="text-decoration:none;">View analytics</a>
+          <a href="paper-maker.html?classId=${c.id}" class="sr-btn-primary" style="text-decoration:none;">New assessment</a>
+        </div>
+      </div>` : ''}
+    </div>`;
+  }
+
+  async function onCreate() {
+    draft.board = document.getElementById('dBoard').value;
+    draft.section = document.getElementById('dSection').value.trim();
+    draft.subject = document.getElementById('dSubject').value.trim();
+    draft.students = document.getElementById('dStudents').value.trim();
+    if (!draft.section || !draft.subject) { toast('Add a grade/section and a subject to continue'); return; }
+    try {
+      await api('/classes', { method: 'POST', body: { board: draft.board, section: draft.section, subject: draft.subject, students: Number(draft.students) || 0 } });
+      toast(`Class ${draft.section} created`);
+      draft.section = ''; draft.subject = ''; draft.students = ''; addFormOpen = false;
+      await load();
+    } catch (e) { errorToast(e); }
+  }
+
+  await load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Settings — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { main } = await mountShell('settings', 'Settings');
+  main.classList.add('narrow');
+  main.style.paddingBottom = '90px';
+
+  let user = await api('/auth/me').then((r) => r.user);
+  const f = { name: user.name, school: user.school || '', phone: user.phone || '', email: user.email, newPass: '' };
+  const boards = Object.fromEntries((user.boards || []).map((b) => [b, true]));
+  const grades = Object.fromEntries((user.grades || []).map((g) => [g, true]));
+  const subjects = Object.fromEntries((user.subjects || []).map((s) => [s, true]));
+  let medium = user.medium, difficulty = user.difficulty, mix = user.questionMix, lang = user.lang;
+  const notif = Object.assign({ evalDone: true, lowCredit: true, weekly: false }, user.notifications || {});
+
+  function seg(list, current, onPick) {
+    return `<div class="sr-seg">${list.map((v) => `<button data-v="${esc(v)}" class="${v === current ? 'active' : ''}">${esc(v)}</button>`).join('')}</div>`;
+  }
+  function chipRow(list, sel, prefix) {
+    return list.map((v) => `<button data-${prefix}="${esc(v)}" class="sr-chip${sel[v] ? ' active' : ''}">${esc(v)}</button>`).join('');
+  }
+
+  function render() {
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Settings</h1>
+        <p class="sr-subtitle">Your profile, teaching context and preferences.</p>
+      </div>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">PROFILE</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div class="sr-field"><span class="label">Full name</span><input type="text" id="fName" value="${esc(f.name)}"></div>
+          <div class="sr-field"><span class="label">School</span><input type="text" id="fSchool" value="${esc(f.school)}"></div>
+          <div class="sr-field"><span class="label">Phone</span><input type="text" id="fPhone" value="${esc(f.phone)}"></div>
+          <div class="sr-field"><span class="label">Email</span><input type="text" id="fEmail" value="${esc(f.email)}"></div>
+        </div>
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">BOARDS &amp; SUBJECTS TAUGHT</span>
+        <div style="display:flex;flex-direction:column;gap:6px;"><span style="font-size:12px;color:#8A8272;">Boards</span><div style="display:flex;flex-wrap:wrap;gap:8px;" id="boardChips">${chipRow(['CBSE', 'ICSE', 'GSEB'], boards, 'board')}</div></div>
+        <div style="display:flex;flex-direction:column;gap:6px;"><span style="font-size:12px;color:#8A8272;">Grades</span><div style="display:flex;flex-wrap:wrap;gap:8px;" id="gradeChips">${chipRow(['8', '9', '10', '11', '12'].map((g) => 'Class ' + g), Object.fromEntries(Object.keys(grades).map((g) => ['Class ' + g, true])), 'grade')}</div></div>
+        <div style="display:flex;flex-direction:column;gap:6px;"><span style="font-size:12px;color:#8A8272;">Subjects</span><div style="display:flex;flex-wrap:wrap;gap:8px;" id="subjectChips">${chipRow(['Science', 'Mathematics', 'Social Science', 'English'], subjects, 'subject')}</div></div>
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">TEACHING PREFERENCES</span>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="width:150px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Default medium</span><div id="mediumSeg">${seg(['English', 'हिन्दी'], medium)}</div></div>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="width:150px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Default difficulty</span><div id="diffSeg">${seg(['Gentle', 'Balanced', 'Challenge'], difficulty)}</div></div>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="width:150px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Default question mix</span><div id="mixSeg">${seg(['Short-answer heavy', 'Balanced mix'], mix)}</div></div>
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">INTERFACE LANGUAGE</span>
+        <div id="langSeg">${seg(['English', 'हिन्दी', 'ગુજરાતી'], lang)}</div>
+        <span style="font-size:12px;color:#8A8272;">Changes menus, buttons and labels. Your generated content's medium is set per class above.</span>
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">NOTIFICATIONS</span>
+        ${notifRow('evalDone', 'Evaluation complete', 'When AI evaluation finishes a batch of answer sheets')}
+        ${notifRow('lowCredit', 'Low credit balance', 'When your balance drops below 10% of your monthly allowance')}
+        ${notifRow('weekly', 'Weekly summary', 'A Sunday-evening digest of the week ahead')}
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">SECURITY</span>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <input type="password" id="fNewPass" placeholder="New password" style="flex:1;border:1px solid #DCD5C3;border-radius:7px;padding:9px 11px;font-size:13.5px;font-family:inherit;background:#FBF9F2;outline:none;">
+          <button id="btnChangePw" class="sr-btn-secondary">Update password</button>
+        </div>
+        <span style="font-size:12px;color:#8A8272;">Phone + OTP sign-in stays available regardless of password changes.</span>
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#A2593F;">DANGER ZONE</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;flex-direction:column;gap:1px;"><span style="font-size:13.5px;font-weight:500;color:#2B2B2B;">Export your data</span><span style="font-size:12px;color:#8A8272;">Question Bank, materials and assessments — yours regardless of plan.</span></div>
+          <button id="btnExport" class="sr-btn-secondary">Export</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;flex-direction:column;gap:1px;"><span style="font-size:13.5px;font-weight:500;color:#2B2B2B;">Delete account</span><span style="font-size:12px;color:#8A8272;">Permanently removes your data. Cannot be undone.</span></div>
+          <button id="btnDelete" style="background:#FFFFFF;border:1px solid #C1654B;color:#A2593F;border-radius:7px;padding:8px 14px;font-size:12.5px;font-family:inherit;cursor:pointer;">Delete</button>
+        </div>
+      </section>
+
+      <div id="saveBar" style="position:sticky;bottom:0;display:flex;justify-content:flex-end;align-items:center;padding:14px 0;background:linear-gradient(to top, #F5F2E9 60%, transparent);">
+        <button id="btnSave" class="sr-btn-primary">Save changes</button>
+      </div>
+    `;
+
+    document.getElementById('boardChips').querySelectorAll('[data-board]').forEach((el) => el.onclick = () => { boards[el.dataset.board] = !boards[el.dataset.board]; render(); });
+    document.getElementById('gradeChips').querySelectorAll('[data-grade]').forEach((el) => el.onclick = () => {
+      const key = el.dataset.grade;
+      grades[key] ? delete grades[key] : (grades[key] = true);
+      render();
+    });
+    document.getElementById('subjectChips').querySelectorAll('[data-subject]').forEach((el) => el.onclick = () => { subjects[el.dataset.subject] = !subjects[el.dataset.subject]; render(); });
+    document.getElementById('mediumSeg').querySelectorAll('[data-v]').forEach((el) => el.onclick = () => { medium = el.dataset.v; render(); });
+    document.getElementById('diffSeg').querySelectorAll('[data-v]').forEach((el) => el.onclick = () => { difficulty = el.dataset.v; render(); });
+    document.getElementById('mixSeg').querySelectorAll('[data-v]').forEach((el) => el.onclick = () => { mix = el.dataset.v; render(); });
+    document.getElementById('langSeg').querySelectorAll('[data-v]').forEach((el) => el.onclick = () => { lang = el.dataset.v; render(); });
+    main.querySelectorAll('[data-notif]').forEach((el) => el.onclick = () => { notif[el.dataset.notif] = !notif[el.dataset.notif]; render(); });
+
+    document.getElementById('btnChangePw').onclick = async () => {
+      const pw = document.getElementById('fNewPass').value;
+      if (!pw) { toast('Enter a new password first'); return; }
+      try { await api('/settings/password', { method: 'POST', body: { newPassword: pw } }); toast('Password updated'); document.getElementById('fNewPass').value = ''; }
+      catch (e) { errorToast(e); }
+    };
+    document.getElementById('btnExport').onclick = () => { toast('Export started — opening your download'); window.open('/api/settings/export', '_blank'); };
+    document.getElementById('btnDelete').onclick = () => toast(`A confirmation link has been sent to ${user.email}`);
+
+    document.getElementById('btnSave').onclick = onSave;
+  }
+
+  function notifRow(key, label, desc) {
+    const on = notif[key];
+    return `<div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;flex-direction:column;gap:1px;"><span style="font-size:13.5px;font-weight:500;color:#2B2B2B;">${label}</span><span style="font-size:12px;color:#8A8272;">${desc}</span></div>
+      <button data-notif="${key}" style="width:38px;height:22px;border-radius:99px;border:none;cursor:pointer;position:relative;background:${on ? '#0F4C4F' : '#D9D2C5'};flex-shrink:0;">
+        <span style="position:absolute;top:2px;width:18px;height:18px;border-radius:99px;background:#FFFFFF;box-shadow:0 1px 3px rgba(0,0,0,0.25);left:${on ? '18px' : '2px'};transition:left .15s;"></span>
+      </button>
+    </div>`;
+  }
+
+  async function onSave() {
+    const body = {
+      name: document.getElementById('fName').value,
+      school: document.getElementById('fSchool').value,
+      phone: document.getElementById('fPhone').value,
+      email: document.getElementById('fEmail').value,
+      boards: Object.keys(boards).filter((k) => boards[k]),
+      grades: Object.keys(grades).filter((k) => grades[k]).map((g) => g.replace('Class ', '')),
+      subjects: Object.keys(subjects).filter((k) => subjects[k]),
+      medium, difficulty, questionMix: mix, lang, notifications: notif
+    };
+    try {
+      const res = await api('/settings', { method: 'PATCH', body });
+      user = res.user;
+      const bar = document.getElementById('saveBar');
+      bar.insertAdjacentHTML('afterbegin', '<span style="font-size:13px;color:#3E5240;align-self:center;margin-right:12px;" id="savedTick">✓ Saved</span>');
+      setTimeout(() => document.getElementById('savedTick')?.remove(), 2200);
+    } catch (e) { errorToast(e); }
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

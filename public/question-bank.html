@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Question Bank — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { main } = await mountShell('question-bank', 'Question Bank');
+  main.classList.add('wide');
+  main.style.paddingBottom = '96px';
+
+  const state = { q: '', chapter: 'All', type: 'All', difficulty: 'All', favoritesOnly: false, expanded: {} };
+  let data = { questions: [], total: 0, chapters: [] };
+
+  async function load() {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.chapter !== 'All') params.set('chapter', state.chapter);
+    if (state.type !== 'All') params.set('type', state.type);
+    if (state.difficulty !== 'All') params.set('difficulty', state.difficulty);
+    if (state.favoritesOnly) params.set('favoritesOnly', 'true');
+    data = await api('/questions?' + params.toString());
+    render();
+  }
+  const debouncedLoad = debounce(load, 300);
+
+  function render() {
+    const shortlistCount = data.questions.filter((q) => q.shortlisted).length;
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Question Bank</h1>
+        <p class="sr-subtitle">${data.total} questions, growing automatically every time you generate or evaluate.</p>
+      </div>
+
+      <div class="sr-card" style="display:flex;flex-direction:column;gap:10px;padding:14px 16px;">
+        <input type="text" id="qSearch" placeholder="Search questions by text or topic…" value="${esc(state.q)}"
+          style="border:1px solid #DCD5C3;border-radius:8px;padding:9px 12px;font-size:13.5px;font-family:inherit;background:#FBF9F2;outline:none;">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          ${['All', ...data.chapters].map((c) => chip(c, state.chapter === c, `data-chapter="${esc(c)}"`)).join('')}
+          <span style="width:1px;height:20px;background:#E4DECD;margin:0 4px;"></span>
+          <div class="sr-seg">${['All', 'MCQ', 'Short', 'Long'].map((t) => `<button data-type="${t}" class="${state.type === t ? 'active' : ''}">${t}</button>`).join('')}</div>
+          <div class="sr-seg">${['All', 'Easy', 'Medium', 'Hard'].map((d) => `<button data-diff="${d}" class="${state.difficulty === d ? 'active' : ''}">${d}</button>`).join('')}</div>
+          <button id="favToggle" class="sr-chip ${state.favoritesOnly ? 'active' : ''}" style="${state.favoritesOnly ? 'background:#F6EDD4;border-color:#E3C98F;color:#8C6A1E;font-weight:600;' : ''}">★ Favorites</button>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:baseline;justify-content:space-between;">
+        <span style="font-size:12.5px;color:#8A8272;">${data.questions.length} matching questions</span>
+        ${shortlistCount > 0 ? `<span style="font-size:12.5px;font-weight:600;color:#0F4C4F;">${shortlistCount} added to shortlist</span>` : ''}
+      </div>
+
+      <div id="qList" style="display:flex;flex-direction:column;gap:10px;"></div>
+    `;
+
+    document.getElementById('qSearch').addEventListener('input', (e) => { state.q = e.target.value; debouncedLoad(); });
+    main.querySelectorAll('[data-chapter]').forEach((el) => el.onclick = () => { state.chapter = el.dataset.chapter; load(); });
+    main.querySelectorAll('[data-type]').forEach((el) => el.onclick = () => { state.type = el.dataset.type; load(); });
+    main.querySelectorAll('[data-diff]').forEach((el) => el.onclick = () => { state.difficulty = el.dataset.diff; load(); });
+    document.getElementById('favToggle').onclick = () => { state.favoritesOnly = !state.favoritesOnly; load(); };
+
+    renderList();
+    renderShortlistBar(shortlistCount);
+  }
+
+  function chip(label, active, attrs) {
+    return `<button ${attrs} class="sr-chip${active ? ' active' : ''}">${esc(label)}</button>`;
+  }
+
+  function renderList() {
+    const list = document.getElementById('qList');
+    if (!data.questions.length) {
+      list.innerHTML = `<div class="sr-card" style="text-align:center;padding:40px 0;color:#8A8272;font-size:13.5px;">No questions match these filters. Try clearing a filter or search term.</div>`;
+      return;
+    }
+    list.innerHTML = data.questions.map((q) => `
+      <div class="sr-card" style="padding:15px 16px;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <button data-fav="${q.id}" style="border:none;background:transparent;cursor:pointer;font-size:17px;color:${q.favorite ? '#C6922E' : '#D9D2C5'};flex-shrink:0;padding:0;line-height:1;">★</button>
+          <div style="flex:1;font-size:13.8px;color:#2B2B2B;line-height:1.5;">${esc(q.text)}</div>
+          <span style="font-size:13px;font-weight:600;color:#8A8272;flex-shrink:0;">[${q.marks}]</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-left:29px;">
+          <span class="qb-tag">Class ${esc(q.grade || '—')}</span>
+          <span class="qb-tag">${esc(q.chapter)}</span>
+          <span class="qb-tag">${esc(q.type)}</span>
+          <span class="qb-tag" style="color:${q.difficulty === 'Hard' ? '#A2593F' : '#8A8272'};">${esc(q.difficulty)}</span>
+        </div>
+        ${state.expanded[q.id] ? `<div style="margin-left:29px;padding:9px 12px;background:#EDF1ED;border:1px solid #D6DFD6;border-radius:6px;font-size:13px;line-height:1.5;color:#37452F;"><strong>Ans.</strong> ${esc(q.answer)}</div>` : ''}
+        <div style="display:flex;gap:8px;margin-left:29px;">
+          <button data-preview="${q.id}" class="sr-btn-secondary" style="padding:6px 12px;font-size:12px;">${state.expanded[q.id] ? 'Hide answer' : 'Preview answer'}</button>
+          <button data-edit="${q.id}" class="sr-btn-secondary" style="padding:6px 12px;font-size:12px;">Edit</button>
+          <button data-shortlist="${q.id}" style="background:${q.shortlisted ? '#0F4C4F' : '#FFFFFF'};border:1px solid #0F4C4F;color:${q.shortlisted ? '#F5F2E9' : '#0F4C4F'};border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;">${q.shortlisted ? '✓ Added' : '+ Add to shortlist'}</button>
+        </div>
+      </div>`).join('');
+
+    list.querySelectorAll('[data-fav]').forEach((el) => el.onclick = () => toggleField(el.dataset.fav, 'favorite'));
+    list.querySelectorAll('[data-shortlist]').forEach((el) => el.onclick = () => toggleField(el.dataset.shortlist, 'shortlisted'));
+    list.querySelectorAll('[data-preview]').forEach((el) => el.onclick = () => { const id = el.dataset.preview; state.expanded[id] = !state.expanded[id]; renderList(); });
+    list.querySelectorAll('[data-edit]').forEach((el) => el.onclick = () => toast('Opens the same inline editor as Paper Maker’s question editor.'));
+  }
+
+  async function toggleField(id, field) {
+    const q = data.questions.find((x) => x.id === id);
+    if (!q) return;
+    q[field] = !q[field];
+    renderList();
+    renderShortlistBar(data.questions.filter((x) => x.shortlisted).length);
+    try { await api(`/questions/${id}`, { method: 'PATCH', body: { [field]: q[field] } }); }
+    catch (e) { q[field] = !q[field]; renderList(); errorToast(e); }
+  }
+
+  function renderShortlistBar(count) {
+    let bar = document.getElementById('shortlistBar');
+    if (count > 0) {
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'shortlistBar';
+        bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#0F4C4F;color:#F5F2E9;padding:12px 10px 12px 18px;border-radius:99px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(15,76,79,0.28);display:flex;gap:14px;align-items:center;z-index:55;';
+        document.body.appendChild(bar);
+      }
+      bar.innerHTML = `<span>${count} questions shortlisted</span><a href="paper-maker.html" style="background:#C6922E;color:#0F4C4F;border-radius:99px;padding:7px 14px;font-size:12.5px;font-weight:600;">Create paper →</a>`;
+    } else if (bar) {
+      bar.remove();
+    }
+  }
+
+  await load();
+})();
+</script>
+<style>.qb-tag{font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;color:#8A8272;background:#F5F2E9;border:1px solid #E4DECD;border-radius:5px;padding:2px 7px;}</style>
+</body>
+</html>

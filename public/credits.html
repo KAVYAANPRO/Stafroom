@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Credits &amp; Billing — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { main } = await mountShell('credits', 'Credits & Billing');
+
+  let billing, pricing, user;
+  const state = { period: 'monthly', pack: null };
+
+  async function load() {
+    [billing, pricing, user] = await Promise.all([api('/billing'), api('/billing/pricing'), api('/auth/me').then(r => r.user)]);
+    render();
+  }
+
+  function render() {
+    const balancePct = Math.min(100, Math.round((billing.balance / billing.allowance) * 100));
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Credits &amp; Billing</h1>
+        <p class="sr-subtitle">Every AI action shows its cost before you confirm — nothing is deducted as a surprise.</p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;">
+        <div class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">CREDIT BALANCE</span>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <span style="font-family:'Source Serif 4',serif;font-size:32px;font-weight:600;color:#0F4C4F;">${Math.round(billing.balance).toLocaleString()}</span>
+            <span style="font-size:13px;color:#8A8272;">of ${Math.round(billing.allowance).toLocaleString()} monthly allowance</span>
+          </div>
+          <div style="height:8px;border-radius:99px;background:#E4DECD;overflow:hidden;"><div style="height:8px;background:#C6922E;width:${balancePct}%;"></div></div>
+          <span style="font-size:12px;color:#8A8272;">Resets ${fmtDate(billing.resetOn)} · unused allowance does not carry over</span>
+          <button id="btnBuy" class="sr-btn-primary" style="align-self:flex-start;margin-top:4px;">Buy top-up credits</button>
+        </div>
+        <div class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">CURRENT PLAN</span>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <span style="font-family:'Source Serif 4',serif;font-size:22px;font-weight:600;color:#0F4C4F;">${billing.plan}</span>
+            <span style="font-size:11px;font-weight:600;background:#EDF1ED;color:#3E5240;border-radius:99px;padding:2px 8px;">Active</span>
+          </div>
+          <span style="font-size:13px;color:#6E675C;line-height:1.5;">${pricing.plans[billing.plan].description}</span>
+          <span style="font-size:13px;font-weight:600;color:#0F4C4F;">${pricing.plans[billing.plan].monthly === 0 ? 'Free' : '₹' + pricing.plans[billing.plan].monthly + '/mo · ' + pricing.plans[billing.plan].credits.toLocaleString() + ' credits'}</span>
+        </div>
+      </div>
+
+      <section style="display:flex;flex-direction:column;gap:10px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">USAGE HISTORY</span>
+        <div class="sr-card" style="overflow:hidden;">
+          <div style="display:flex;padding:10px 16px;font-size:11.5px;font-weight:600;color:#8A8272;border-bottom:1px solid #E4DECD;">
+            <span style="flex:1;">Action</span><span style="width:130px;">When</span><span style="width:80px;text-align:right;">Credits</span><span style="width:90px;text-align:right;">Balance</span>
+          </div>
+          ${billing.ledger.length ? billing.ledger.map((l) => `
+            <div style="display:flex;padding:11px 16px;font-size:13px;color:#2B2B2B;border-bottom:1px solid #E4DECD;align-items:center;">
+              <div style="flex:1;display:flex;flex-direction:column;gap:1px;"><span style="font-weight:500;">${esc(l.action)}</span><span style="font-size:11.5px;color:#8A8272;">${esc(l.detail)}</span></div>
+              <span style="width:130px;color:#8A8272;font-size:12.5px;">${relTime(l.createdAt)}</span>
+              <span style="width:80px;text-align:right;font-weight:600;color:${l.delta >= 0 ? '#3E5240' : '#A2593F'};">${l.delta >= 0 ? '+' : ''}${l.delta}</span>
+              <span style="width:90px;text-align:right;color:#8A8272;">${Math.round(l.balanceAfter).toLocaleString()}</span>
+            </div>`).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No usage yet.</div>`}
+        </div>
+      </section>
+
+      <section style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">PLAN COMPARISON</span>
+          <div class="sr-seg">
+            <button data-period="monthly" class="${state.period === 'monthly' ? 'active' : ''}">Monthly</button>
+            <button data-period="annual" class="${state.period === 'annual' ? 'active' : ''}">Annual — save ~17%</button>
+          </div>
+        </div>
+        <div id="planGrid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;"></div>
+      </section>
+    `;
+
+    document.getElementById('btnBuy').onclick = () => openBuyModal();
+    main.querySelectorAll('[data-period]').forEach((el) => el.onclick = () => { state.period = el.dataset.period; render(); });
+    renderPlanGrid();
+  }
+
+  const featureRows = {
+    Free: [['✓', 'AI Paper Maker', '#2B2B2B'], ['✓', 'AI Quiz Maker', '#2B2B2B'], ['✓', 'Limited monthly credits', '#2B2B2B'], ['—', 'Notes Maker, Analytics, Evaluator', '#B7AF9E']],
+    Pro: [['✓', 'Everything in Free', '#2B2B2B'], ['✓', 'AI Notes Maker', '#2B2B2B'], ['✓', 'Worksheet Generator', '#2B2B2B'], ['✓', 'Student Performance Analyzer', '#2B2B2B'], ['—', 'AI Answer Evaluator', '#B7AF9E']],
+    Max: [['✓', 'Everything in Pro', '#2B2B2B'], ['✓', 'AI Answer Evaluator', '#2B2B2B'], ['✓', 'Weak Concept Detection', '#2B2B2B'], ['✓', 'Class Intelligence Dashboard', '#2B2B2B'], ['✓', 'AI Lesson Planner', '#2B2B2B']]
+  };
+
+  function renderPlanGrid() {
+    const isAnnual = state.period === 'annual';
+    document.getElementById('planGrid').innerHTML = ['Free', 'Pro', 'Max'].map((name) => {
+      const meta = pricing.plans[name];
+      const isCurrent = name === billing.plan;
+      const price = meta.monthly === 0 ? '₹0' : (isAnnual ? '₹' + meta.annual.toLocaleString() : '₹' + meta.monthly);
+      const priceSub = meta.monthly === 0 ? 'forever' : (isAnnual ? 'per year · ≈₹' + Math.round(meta.annual / 12) + '/mo' : 'per month');
+      return `
+      <div class="sr-card" style="border:${isCurrent ? '1.5px solid #0F4C4F' : '1px solid #DCD5C3'};padding:18px;display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-family:'Source Serif 4',serif;font-size:17px;font-weight:600;color:#0F4C4F;">${name}</span>
+          ${isCurrent ? '<span style="font-size:10.5px;font-weight:600;background:#EDF1ED;color:#3E5240;border-radius:99px;padding:2px 8px;">Current</span>' : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="font-family:'Source Serif 4',serif;font-size:22px;font-weight:600;color:#2B2B2B;">${price}</span>
+          <span style="font-size:11.5px;color:#8A8272;">${priceSub}</span>
+        </div>
+        <span style="font-size:12.5px;font-weight:600;color:#8C6A1E;background:#F6EDD4;border-radius:99px;padding:3px 9px;align-self:flex-start;">${meta.credits.toLocaleString()} credits / mo</span>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          ${featureRows[name].map(([mark, text, color]) => `<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:${color};"><span style="flex-shrink:0;">${mark}</span><span>${text}</span></div>`).join('')}
+        </div>
+        ${!isCurrent ? `<button data-switch="${name}" style="background:#FFFFFF;border:1px solid #0F4C4F;color:#0F4C4F;border-radius:7px;padding:9px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;">${name === 'Max' ? 'Upgrade to Max' : 'Switch to ' + name}</button>` : ''}
+      </div>`;
+    }).join('');
+    document.querySelectorAll('[data-switch]').forEach((el) => el.onclick = () => openSwitchModal(el.dataset.switch));
+  }
+
+  const switchWarnings = {
+    Free: 'You will lose access to Notes Maker, Worksheet Generator, Performance Analyzer and the full evaluation loop.',
+    Pro: 'You will lose access to AI Answer Evaluator, Weak Concept Detection and the Class Intelligence Dashboard.',
+    Max: 'You will unlock AI Answer Evaluator, Weak Concept Detection, Class Intelligence Dashboard and the AI Lesson Planner.'
+  };
+
+  function openSwitchModal(target) {
+    openModal(`
+      <span style="font-family:'Source Serif 4',serif;font-size:19px;font-weight:600;color:#0F4C4F;">Switch to ${target}?</span>
+      <p style="margin:0;font-size:13px;color:#6E675C;line-height:1.55;">${switchWarnings[target]}</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="mCancel" class="sr-btn-secondary">Cancel</button>
+        <button id="mConfirm" class="sr-btn-primary">Confirm switch</button>
+      </div>
+    `);
+    document.getElementById('mCancel').onclick = closeModal;
+    document.getElementById('mConfirm').onclick = async () => {
+      const btn = document.getElementById('mConfirm');
+      btn.disabled = true;
+      try {
+        await payWithRazorpay({ kind: 'plan', plan: target, period: state.period }, async () => {
+          closeModal();
+          toast(`Switched to the ${target} plan`);
+          await load();
+        });
+      } catch (e) { errorToast(e); }
+      finally { btn.disabled = false; }
+    };
+  }
+
+  function openBuyModal() {
+    state.pack = null;
+    renderBuyModal();
+  }
+  function renderBuyModal() {
+    const existing = document.getElementById('srModal');
+    if (existing) existing.remove();
+    openModal(`
+      <span style="font-family:'Source Serif 4',serif;font-size:19px;font-weight:600;color:#0F4C4F;">Buy top-up credits</span>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${pricing.topUpPacks.map((pk) => `
+          <button data-pack="${pk.id}" style="display:flex;flex-direction:column;gap:2px;text-align:left;padding:11px 14px;border-radius:8px;font-family:inherit;font-size:13.5px;font-weight:600;color:#2B2B2B;cursor:pointer;${state.pack === pk.id ? 'border:1.5px solid #0F4C4F;background:#E6EFEE;' : 'border:1px solid #DCD5C3;background:#FBF9F2;'}">
+            <span style="display:flex;justify-content:space-between;width:100%;"><span>${pk.label}</span><span>₹${pk.price}</span></span>
+            <span style="font-size:11.5px;color:#8A8272;font-weight:400;">${pk.note}</span>
+          </button>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="mCancel" class="sr-btn-secondary">Cancel</button>
+        <button id="mConfirm" style="background:${state.pack ? '#0F4C4F' : '#D9D2C5'};border:none;color:#F5F2E9;border-radius:7px;padding:9px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:${state.pack ? 'pointer' : 'not-allowed'};">Confirm purchase</button>
+      </div>
+    `);
+    document.querySelectorAll('[data-pack]').forEach((el) => el.onclick = () => { state.pack = el.dataset.pack; renderBuyModal(); });
+    document.getElementById('mCancel').onclick = closeModal;
+    document.getElementById('mConfirm').onclick = async () => {
+      if (!state.pack) { toast('Choose a pack first'); return; }
+      const packSnapshot = pricing.topUpPacks.find((p) => p.id === state.pack);
+      try {
+        await payWithRazorpay({ kind: 'topup', packId: state.pack }, async (res) => {
+          closeModal();
+          refreshCreditChips(res.balance);
+          toast(`₹${packSnapshot.price} charged — +${packSnapshot.credits} credits added to your balance`);
+          await load();
+        });
+      } catch (e) { errorToast(e); }
+    };
+  }
+
+  // Loaded on demand (not in <head>) so a slow/blocked CDN never delays the
+  // page itself, and so we can surface a real reason when it fails instead
+  // of a generic "didn't work" message.
+  let razorpayScriptPromise = null;
+  function loadRazorpayScript() {
+    if (typeof Razorpay !== 'undefined') return Promise.resolve(true);
+    if (razorpayScriptPromise) return razorpayScriptPromise;
+    razorpayScriptPromise = new Promise((resolve) => {
+      const el = document.createElement('script');
+      el.src = 'https://checkout.razorpay.com/v2/checkout.js';
+      el.onload = () => resolve(typeof Razorpay !== 'undefined');
+      el.onerror = () => resolve(false);
+      // Belt-and-braces: some ad/privacy blockers let the <script> tag
+      // "load" (no onerror) but strip its contents, so Razorpay never
+      // actually gets defined. Time out rather than hang forever.
+      setTimeout(() => resolve(typeof Razorpay !== 'undefined'), 6000);
+      document.head.appendChild(el);
+    });
+    return razorpayScriptPromise;
+  }
+
+  /**
+   * Runs a checkout: asks the server for either "applied immediately" (free
+   * things, like switching to the Free plan) or a real Razorpay order, then
+   * opens the Razorpay widget and verifies the payment server-side before
+   * treating it as successful.
+   */
+  async function payWithRazorpay(body, onApplied) {
+    const checkout = await api('/billing/checkout', { method: 'POST', body });
+    if (checkout.applied) { onApplied(checkout); return; }
+
+    const ready = await loadRazorpayScript();
+    if (!ready) {
+      toast('Payment widget was blocked from loading — try disabling an ad blocker or privacy shield for this site, then retry');
+      console.error('Razorpay checkout.js failed to load or was blocked (ad blocker / privacy extension / network filter are the usual causes).');
+      return;
+    }
+    const rzp = new Razorpay({
+      key: checkout.keyId,
+      order_id: checkout.orderId,
+      amount: checkout.amount,
+      currency: checkout.currency,
+      name: checkout.name,
+      description: checkout.description,
+      prefill: checkout.prefill,
+      theme: { color: '#0F4C4F' },
+      handler: async (response) => {
+        try {
+          const verified = await api('/billing/verify', {
+            method: 'POST',
+            body: {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            }
+          });
+          onApplied(verified);
+        } catch (e) { errorToast(e); }
+      },
+      modal: { ondismiss: () => toast('Payment cancelled') }
+    });
+    rzp.on('payment.failed', () => toast('Payment failed — no changes made'));
+    rzp.open();
+  }
+
+  function openModal(inner) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sr-modal-backdrop';
+    backdrop.id = 'srModal';
+    backdrop.innerHTML = `<div class="sr-modal">${inner}</div>`;
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+    document.body.appendChild(backdrop);
+  }
+  function closeModal() { document.getElementById('srModal')?.remove(); }
+
+  await load();
+})();
+</script>
+</body>
+</html>

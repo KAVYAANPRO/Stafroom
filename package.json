@@ -1,0 +1,25 @@
+{
+  "name": "staffroom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Staffroom — a teaching workspace for CBSE/ICSE/GSEB teachers. Backend + served UI.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "node tools/build-frontend.js",
+    "seed": "node src/db/seed.js",
+    "setup": "npm run seed && npm run build",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.5.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jose": "^5.9.6",
+    "razorpay": "^2.9.5"
+  }
+}

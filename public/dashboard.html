@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Dashboard — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { user, main } = await mountShell('dashboard', 'Dashboard');
+  main.innerHTML = '<div class="sr-loading">Loading your dashboard…</div>';
+
+  let data;
+  try { data = await api('/dashboard'); } catch (e) { main.innerHTML = `<div class="sr-loading">${esc(e.message)}</div>`; return; }
+
+  const statusStyle = { Evaluated: ['#EDF1ED', '#3E5240'], Distributed: ['#E6EFEE', '#0F4C4F'], Finalized: ['#F6EDD4', '#8C6A1E'], Draft: ['#EFEADD', '#6E675C'] };
+  const sevStyle = { High: ['#F7E9E4', '#A2593F'], Medium: ['#F6EDD4', '#8C6A1E'] };
+
+  main.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:3px;">
+      <h1 class="sr-title lg">Good morning, ${esc(data.greetingName)}</h1>
+      <p class="sr-subtitle">${data.classCount} classes · ${data.studentTotal} students — here's what needs your attention today.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      <a href="credits.html" class="sr-card" style="padding:16px 18px;display:flex;flex-direction:column;gap:8px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">CREDIT BALANCE</span>
+        <span id="creditBalanceStat" style="font-family:'Source Serif 4',serif;font-size:24px;font-weight:600;color:#0F4C4F;">${Math.round(data.credits.balance).toLocaleString()}</span>
+        <div style="height:6px;border-radius:99px;background:#E4DECD;overflow:hidden;"><div id="creditBalanceBar" style="width:${Math.min(100, Math.round((data.credits.balance / data.credits.allowance) * 100))}%;height:6px;background:#C6922E;"></div></div>
+        <span style="font-size:12px;color:#8A8272;">of ${Math.round(data.credits.allowance).toLocaleString()} monthly</span>
+      </a>
+      <a href="classes.html" class="sr-card" style="padding:16px 18px;display:flex;flex-direction:column;gap:8px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">CLASSES</span>
+        <span style="font-family:'Source Serif 4',serif;font-size:24px;font-weight:600;color:#0F4C4F;">${data.classCount}</span>
+        <span style="font-size:12.5px;color:#6E675C;">${data.studentTotal} students · ${esc(data.subjectSummary)}</span>
+        <span style="font-size:12px;color:#0F4C4F;font-weight:600;">View classes →</span>
+      </a>
+      <div class="sr-card" style="padding:16px 18px;display:flex;flex-direction:column;gap:8px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">THIS MONTH</span>
+        <span style="font-family:'Source Serif 4',serif;font-size:24px;font-weight:600;color:#0F4C4F;">${data.upcomingCount}</span>
+        <span style="font-size:12.5px;color:#6E675C;">assessments in progress · ${data.needsReviewCount} awaiting evaluation review</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:20px;align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:20px;">
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">RECOMMENDED ACTIONS</span>
+          <div id="recActions" style="display:flex;flex-direction:column;gap:10px;"></div>
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">ASSESSMENTS</span>
+            <a href="paper-maker.html" style="font-size:12.5px;font-weight:600;">New assessment →</a>
+          </div>
+          <div class="sr-card" style="overflow:hidden;">
+            ${data.assessments.length ? data.assessments.map((row) => `
+              <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #E4DECD;">
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px;">
+                  <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(row.title)}</span>
+                  <span style="font-size:12px;color:#8A8272;">${esc(row.cls || '')}</span>
+                </div>
+                <span style="font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;background:${(statusStyle[row.status] || statusStyle.Draft)[0]};color:${(statusStyle[row.status] || statusStyle.Draft)[1]};">${row.status}</span>
+                <span style="font-size:12.5px;color:#8A8272;width:96px;text-align:right;">${fmtDate(row.date)}</span>
+              </div>`).join('') : `<div style="padding:20px;font-size:13px;color:#8A8272;">No assessments yet — <a href="paper-maker.html">create your first paper</a>.</div>`}
+          </div>
+        </section>
+
+        ${data.classPerformance ? `
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">CLASS PERFORMANCE — ${esc(data.classPerformance.classKey)}</span>
+          <div class="sr-card" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
+            <div style="display:flex;align-items:flex-end;gap:22px;height:110px;">
+              ${data.classPerformance.chart.map((b) => `
+                <div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;height:100%;justify-content:flex-end;">
+                  <span style="font-size:11.5px;font-weight:600;color:#2B2B2B;">${b.pct}%</span>
+                  <div style="width:100%;max-width:46px;border-radius:5px 5px 0 0;background:#0F4C4F;height:${Math.max(4, b.pct * 0.9)}px;"></div>
+                  <span style="font-size:11px;color:#8A8272;">${esc(b.title)}</span>
+                </div>`).join('')}
+            </div>
+            ${data.classPerformance.chart.length >= 2 ? `<span style="font-size:12.5px;font-weight:600;color:${data.classPerformance.chart.at(-1).pct >= data.classPerformance.chart[0].pct ? '#6E8B6F' : '#C1654B'};">${data.classPerformance.chart.at(-1).pct >= data.classPerformance.chart[0].pct ? '↑' : '↓'} ${Math.abs(data.classPerformance.chart.at(-1).pct - data.classPerformance.chart[0].pct)} points since the first test this term</span>` : ''}
+          </div>
+        </section>` : ''}
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">WEAK CONCEPTS</span>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            ${data.weakConcepts.length ? data.weakConcepts.map((w) => `
+              <div class="sr-card" style="display:flex;align-items:center;gap:14px;padding:13px 16px;">
+                <div style="flex:1;display:flex;flex-direction:column;gap:2px;">
+                  <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(w.concept)}</span>
+                  <span style="font-size:12px;color:#8A8272;">${esc(w.classKey)} · ${esc(w.trend)}</span>
+                </div>
+                <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;background:${sevStyle[w.severity][0]};color:${sevStyle[w.severity][1]};">${w.severity}</span>
+                <button data-gen-concept="${esc(w.concept)}" data-gen-class="${esc(w.classId)}" style="flex-shrink:0;background:#FFFFFF;color:#0F4C4F;border:1px solid #0F4C4F;border-radius:7px;padding:7px 13px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;">Generate practice</button>
+              </div>`).join('') : `<div class="sr-card" style="padding:16px;font-size:13px;color:#8A8272;">No weak concepts detected yet — needs at least two evaluated assessments covering overlapping topics.</div>`}
+          </div>
+        </section>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">YOUR CLASSES</span>
+          ${data.classesMini.map((c) => `
+            <a href="classes.html" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #E4DECD;">
+              <div style="width:30px;height:30px;border-radius:8px;background:#EFEADD;color:#0F4C4F;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${esc(c.key)}</div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:1px;">
+                <span style="font-size:13px;font-weight:600;color:#2B2B2B;">${esc(c.subject)} · ${c.students} students</span>
+                <span style="font-size:11.5px;color:#8A8272;">${c.hasWeak ? esc(c.weakTop) + ' flagged' : 'No active weak concepts'}</span>
+              </div>
+              ${c.trend ? `<span style="font-size:12.5px;font-weight:600;color:${c.trend.startsWith('+') ? '#6E8B6F' : '#C1654B'};">${c.trend}</span>` : ''}
+            </a>`).join('') || '<span style="font-size:13px;color:#8A8272;">No classes yet.</span>'}
+        </div>
+
+        <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">RECENT MATERIALS</span>
+            <a href="materials.html" style="font-size:12px;font-weight:600;">All →</a>
+          </div>
+          ${data.materials.length ? data.materials.map((m) => `
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid #E4DECD;">
+              <span style="font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:#8C6A1E;background:#F3E6C7;border-radius:5px;padding:2px 6px;flex-shrink:0;">${esc(m.type)}</span>
+              <div style="flex:1;display:flex;flex-direction:column;gap:1px;min-width:0;">
+                <span style="font-size:12.5px;font-weight:600;color:#2B2B2B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.title)}</span>
+                <span style="font-size:11px;color:#8A8272;">${relTime(m.date)}</span>
+              </div>
+            </div>`).join('') : '<span style="font-size:13px;color:#8A8272;">Nothing generated yet.</span>'}
+        </div>
+
+        <a href="question-bank.html" class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">QUESTION BANK</span>
+          <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${data.questionBank.total} questions saved</span>
+          <span style="font-size:12px;color:#8A8272;">${data.questionBank.addedThisMonth} added this month · browse and reuse →</span>
+        </a>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('recActions').innerHTML = data.recActions.length ? data.recActions.map((a) => {
+    const dot = { review: '#C1654B', weak_concept: '#C6922E', paper: '#0F4C4F', bank: '#6E8B6F' }[a.kind] || '#0F4C4F';
+    if (a.kind === 'weak_concept') {
+      return `<div class="sr-card" style="display:flex;align-items:center;gap:14px;padding:14px 16px;">
+        <span style="width:8px;height:8px;border-radius:99px;background:${dot};flex-shrink:0;"></span>
+        <div style="flex:1;display:flex;flex-direction:column;gap:2px;"><span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(a.title)}</span><span style="font-size:12.5px;color:#8A8272;">${esc(a.desc)}</span></div>
+        <button data-gen-concept="${esc(a.concept)}" data-gen-class="${esc(a.classId)}" style="flex-shrink:0;background:#0F4C4F;color:#F5F2E9;border:none;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;">${a.cta}</button>
+      </div>`;
+    }
+    const href = a.kind === 'paper' ? `paper-maker.html?assessment=${a.assessmentId}` : a.kind === 'bank' ? 'question-bank.html' : a.kind === 'review' ? 'analytics.html' : '#';
+    return `<a href="${href}" class="sr-card" style="display:flex;align-items:center;gap:14px;padding:14px 16px;">
+      <span style="width:8px;height:8px;border-radius:99px;background:${dot};flex-shrink:0;"></span>
+      <div style="flex:1;display:flex;flex-direction:column;gap:2px;"><span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(a.title)}</span><span style="font-size:12.5px;color:#8A8272;">${esc(a.desc)}</span></div>
+      <span style="flex-shrink:0;background:#0F4C4F;color:#F5F2E9;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:600;">${a.cta}</span>
+    </a>`;
+  }).join('') : `<div class="sr-card" style="padding:16px;font-size:13px;color:#8A8272;">You're all caught up. Nothing needs attention right now.</div>`;
+
+  main.querySelectorAll('[data-gen-concept]').forEach((btn) => {
+    btn.addEventListener('click', () => generatePractice(btn.dataset.genConcept, btn.dataset.genClass, btn));
+  });
+
+  async function generatePractice(concept, classId, btn) {
+    if (btn.disabled) return; // guards against a double-fired click event
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = 'Generating…';
+    try {
+      const res = await api('/materials/generate', { method: 'POST', body: { type: 'Worksheet', concept, classId: classId || undefined, chapter: concept } });
+      refreshCreditChips(res.balance);
+      const stat = document.getElementById('creditBalanceStat');
+      const bar = document.getElementById('creditBalanceBar');
+      if (stat) stat.textContent = Math.round(res.balance).toLocaleString();
+      if (bar) bar.style.width = Math.min(100, Math.round((res.balance / data.credits.allowance) * 100)) + '%';
+      toast(`Practice worksheet on "${concept}" generated and saved to Materials`);
+      btn.textContent = '✓ Generated';
+    } catch (e) {
+      errorToast(e);
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+})();
+</script>
+</body>
+</html>

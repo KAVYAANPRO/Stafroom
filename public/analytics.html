@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Analytics — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { main } = await mountShell('analytics', 'Analytics');
+  main.classList.add('wide');
+
+  const qsClass = new URLSearchParams(location.search).get('class');
+  const state = { tab: 'class', classId: qsClass || null, studentId: null };
+  let classes = [], students = [], classData = null, studentData = null;
+  let modal = null; // { concept, classId, generating }
+
+  async function boot() {
+    const res = await api('/classes');
+    classes = res.classes;
+    if (!state.classId && classes.length) state.classId = classes[0].id;
+    const sres = await api('/analytics/students');
+    students = sres.students;
+    if (!state.studentId && students.length) state.studentId = students[0].id;
+    await loadTabData();
+  }
+
+  async function loadTabData() {
+    try {
+      if (state.tab === 'class' && state.classId) classData = await api(`/analytics/classes/${state.classId}`);
+      if (state.tab === 'student' && state.studentId) studentData = await api(`/analytics/students/${state.studentId}`);
+    } catch (e) {
+      errorToast(e);
+    }
+    render();
+  }
+
+  function render() {
+    main.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <h1 class="sr-title">Analytics</h1>
+          <p class="sr-subtitle">What should you teach next — not just what the average score was.</p>
+        </div>
+        <div class="sr-seg">
+          <button data-tab="class" class="${state.tab === 'class' ? 'active' : ''}">Class-level</button>
+          <button data-tab="student" class="${state.tab === 'student' ? 'active' : ''}">Student-level</button>
+        </div>
+      </div>
+      <div id="tabBody"></div>
+    `;
+    main.querySelectorAll('[data-tab]').forEach((el) => el.onclick = () => { state.tab = el.dataset.tab; loadTabData(); });
+    renderTab();
+  }
+
+  function renderTab() {
+    const body = document.getElementById('tabBody');
+    if (state.tab === 'class') return renderClassTab(body);
+    renderStudentTab(body);
+  }
+
+  function renderClassTab(body) {
+    if (!classes.length) { body.innerHTML = `<div class="sr-card" style="padding:24px;text-align:center;color:#8A8272;">No classes yet — add one from Classes &amp; Subjects.</div>`; return; }
+    const d = classData;
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:18px;">
+        <div style="display:inline-flex;gap:8px;">
+          ${classes.map((c) => `<button data-cls="${c.id}" class="sr-chip${state.classId === c.id ? ' active' : ''}" style="border-radius:8px;padding:7px 15px;font-size:13px;${state.classId === c.id ? 'background:#0F4C4F;border-color:#0F4C4F;color:#F5F2E9;font-weight:600;' : ''}">${esc(c.key)}</button>`).join('')}
+        </div>
+
+        ${d ? `
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">OVERALL PERFORMANCE — ${esc(d.name)}</span>
+          <div class="sr-card" style="padding:18px 20px;display:flex;align-items:flex-end;gap:20px;height:150px;">
+            ${d.chart.length ? d.chart.map((b) => `
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;height:100%;justify-content:flex-end;">
+                <span style="font-size:11.5px;font-weight:600;color:#2B2B2B;">${b.pct}%</span>
+                <div style="width:100%;max-width:46px;border-radius:5px 5px 0 0;background:#0F4C4F;height:${Math.max(4, b.pct * 1.2)}px;"></div>
+                <span style="font-size:11px;color:#8A8272;text-align:center;">${esc(b.title)}</span>
+              </div>`).join('') : `<span style="font-size:13px;color:#8A8272;">No evaluated assessments yet for this class.</span>`}
+          </div>
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">WEAK CONCEPTS</span>
+          ${!d.weak.length ? `<div class="sr-card" style="padding:16px;font-size:13px;color:#6E675C;">No weak concepts detected yet — needs at least two evaluated assessments covering overlapping topics.</div>` : ''}
+          ${d.weak.map((w) => {
+            const sev = w.severity === 'High' ? ['#F7E9E4', '#A2593F'] : ['#F6EDD4', '#8C6A1E'];
+            return `<div class="sr-card" style="display:flex;align-items:center;gap:14px;padding:13px 16px;">
+              <div style="flex:1;display:flex;flex-direction:column;gap:2px;"><span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(w.concept)}</span><span style="font-size:12px;color:#8A8272;">${esc(w.trend)}</span></div>
+              <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;background:${sev[0]};color:${sev[1]};">${w.severity}</span>
+              <button data-gen="${esc(w.concept)}" style="flex-shrink:0;background:#FFFFFF;color:#0F4C4F;border:1px solid #0F4C4F;border-radius:7px;padding:7px 13px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;">Generate practice</button>
+            </div>`;
+          }).join('')}
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">TOPIC STRENGTH &amp; WEAKNESS</span>
+          <div class="sr-card" style="padding:16px 18px;display:flex;flex-direction:column;gap:11px;">
+            ${d.topics.length ? d.topics.map((t) => `
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span style="width:190px;flex-shrink:0;font-size:13px;color:#2B2B2B;">${esc(t.name)}</span>
+                <div style="flex:1;height:8px;border-radius:99px;background:#E4DECD;overflow:hidden;"><div style="height:8px;border-radius:99px;background:${t.pct >= 65 ? '#6E8B6F' : '#C1654B'};width:${t.pct}%;"></div></div>
+                <span style="width:38px;text-align:right;font-size:12.5px;font-weight:600;color:#2B2B2B;">${t.pct}%</span>
+              </div>`).join('') : `<span style="font-size:13px;color:#8A8272;">No topic-level data yet.</span>`}
+          </div>
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">ASSESSMENT COMPARISON</span>
+          <div class="sr-card" style="overflow:hidden;">
+            <div style="display:flex;padding:10px 16px;font-size:11.5px;font-weight:600;color:#8A8272;border-bottom:1px solid #E4DECD;">
+              <span style="flex:1;">Assessment</span><span style="width:90px;">Date</span><span style="width:70px;text-align:right;">Average</span><span style="width:70px;text-align:right;">High</span><span style="width:70px;text-align:right;">Low</span>
+            </div>
+            ${d.assessments.length ? d.assessments.map((a) => `
+              <div style="display:flex;padding:11px 16px;font-size:13px;color:#2B2B2B;border-bottom:1px solid #E4DECD;">
+                <span style="flex:1;font-weight:500;">${esc(a.title)}</span><span style="width:90px;color:#8A8272;">${fmtDate(a.date)}</span><span style="width:70px;text-align:right;font-weight:600;">${a.avg}%</span><span style="width:70px;text-align:right;color:#8A8272;">${a.high}%</span><span style="width:70px;text-align:right;color:#8A8272;">${a.low}%</span>
+              </div>`).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No evaluated assessments yet.</div>`}
+          </div>
+        </section>` : `<div class="sr-loading">Loading…</div>`}
+      </div>
+    `;
+    body.querySelectorAll('[data-cls]').forEach((el) => el.onclick = () => { state.classId = el.dataset.cls; loadTabData(); });
+    body.querySelectorAll('[data-gen]').forEach((el) => el.onclick = () => openGenModal(el.dataset.gen, state.classId));
+  }
+
+  function renderStudentTab(body) {
+    if (!students.length) { body.innerHTML = `<div class="sr-card" style="padding:24px;text-align:center;color:#8A8272;">No students on record yet.</div>`; return; }
+    const d = studentData;
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:240px 1fr;gap:20px;align-items:start;">
+        <div class="sr-card" style="padding:8px;display:flex;flex-direction:column;gap:2px;">
+          ${students.map((s) => `
+            <button data-stu="${s.id}" style="display:flex;justify-content:space-between;align-items:center;padding:9px 11px;border-radius:7px;border:none;font-family:inherit;font-size:13px;cursor:pointer;text-align:left;${state.studentId === s.id ? 'background:#E6EFEE;color:#0F4C4F;font-weight:600;' : 'background:transparent;color:#4A4437;'}">
+              <span>${esc(s.name)}</span><span style="font-size:11.5px;color:#8A8272;">${esc(s.avg)}</span>
+            </button>`).join('')}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:18px;">
+          ${d ? `
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <h2 style="margin:0;font-family:'Source Serif 4',serif;font-size:20px;font-weight:600;color:#0F4C4F;">${esc(d.name)}</h2>
+            <span style="font-size:13px;color:#6E675C;">${esc(d.cls)} · average ${esc(d.avg)}</span>
+          </div>
+          <div class="sr-card" style="padding:18px 20px;display:flex;align-items:flex-end;gap:20px;height:130px;">
+            ${d.chart.length ? d.chart.map((b) => `
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;height:100%;justify-content:flex-end;">
+                <span style="font-size:11px;font-weight:600;color:#2B2B2B;">${b.pct}%</span>
+                <div style="width:100%;max-width:40px;border-radius:5px 5px 0 0;background:#0F4C4F;height:${Math.max(4, b.pct)}px;"></div>
+                <span style="font-size:10.5px;color:#8A8272;">${esc(b.label)}</span>
+              </div>`).join('') : `<span style="font-size:13px;color:#8A8272;">No evaluated assessments yet.</span>`}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">TOPIC STRENGTH &amp; WEAKNESS</span>
+            <div class="sr-card" style="padding:14px 16px;display:flex;flex-direction:column;gap:9px;">
+              ${d.topics.length ? d.topics.map((t) => `
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <span style="width:190px;flex-shrink:0;font-size:13px;color:#2B2B2B;">${esc(t.name)}</span>
+                  <div style="flex:1;height:7px;border-radius:99px;background:#E4DECD;overflow:hidden;"><div style="height:7px;border-radius:99px;background:${t.pct >= 65 ? '#6E8B6F' : '#C1654B'};width:${t.pct}%;"></div></div>
+                  <span style="width:38px;text-align:right;font-size:12px;font-weight:600;color:#2B2B2B;">${t.pct}%</span>
+                </div>`).join('') : `<span style="font-size:13px;color:#8A8272;">No topic data yet.</span>`}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">ASSESSMENT HISTORY</span>
+            <div class="sr-card" style="overflow:hidden;">
+              ${d.history.length ? d.history.map((h) => `<div style="display:flex;justify-content:space-between;padding:10px 16px;font-size:13px;color:#2B2B2B;border-bottom:1px solid #E4DECD;"><span>${esc(h.title)}</span><span style="color:#8A8272;">${fmtDate(h.date)}</span><span style="font-weight:600;">${h.score}</span></div>`).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No assessment history yet.</div>`}
+            </div>
+          </div>` : `<div class="sr-loading">Loading…</div>`}
+        </div>
+      </div>
+    `;
+    body.querySelectorAll('[data-stu]').forEach((el) => el.onclick = () => { state.studentId = el.dataset.stu; loadTabData(); });
+  }
+
+  function openGenModal(concept, classId) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sr-modal-backdrop';
+    backdrop.id = 'srModal';
+    const paint = (generating) => {
+      backdrop.innerHTML = `<div class="sr-modal">${generating ? `
+        <div style="display:flex;flex-direction:column;gap:10px;align-items:center;padding:14px 0;">
+          <span class="sr-spinner"></span>
+          <span style="font-size:13.5px;color:#6E675C;">Writing practice questions on ${esc(concept)}…</span>
+        </div>` : `
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">GENERATE TARGETED PRACTICE</span>
+          <h3 style="margin:0;font-family:'Source Serif 4',serif;font-size:19px;font-weight:600;color:#0F4C4F;">${esc(concept)}</h3>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;background:#F5F2E9;border:1px solid #E4DECD;border-radius:8px;padding:12px;font-size:12.5px;color:#5A5546;">
+          <span>5 questions · mixed difficulty · saved to Materials, tagged to this weak concept.</span>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="mCancel" class="sr-btn-secondary">Cancel</button>
+          <button id="mConfirm" class="sr-btn-primary">Generate</button>
+        </div>`}</div>`;
+      if (!generating) {
+        document.getElementById('mCancel').onclick = () => backdrop.remove();
+        document.getElementById('mConfirm').onclick = async () => {
+          paint(true);
+          try {
+            const res = await api('/materials/generate', { method: 'POST', body: { type: 'Worksheet', concept, classId, chapter: concept } });
+            refreshCreditChips(res.balance);
+            backdrop.remove();
+            toast(`Practice worksheet on "${concept}" generated and saved to Materials`);
+          } catch (e) { backdrop.remove(); errorToast(e); }
+        };
+      }
+    };
+    paint(false);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  }
+
+  await boot();
+})();
+</script>
+</body>
+</html>

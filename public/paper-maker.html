@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Paper Maker — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&family=Noto+Serif+Devanagari:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  @keyframes pulseDot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.75); } }
+  @media print {
+    .sr-hide-print { display: none !important; }
+    #app { height: auto !important; overflow: visible !important; }
+    .sr-scroll { overflow: visible !important; height: auto !important; padding: 0 !important; }
+    .sr-print-area { box-shadow: none !important; border: none !important; padding: 0 !important; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { user, main } = await mountShell('paper-maker', 'Assessments');
+  main.classList.add('wide');
+  main.style.maxWidth = '1120px';
+
+  const qsClassId = new URLSearchParams(location.search).get('classId');
+
+  const st = {
+    stage: 'setup',
+    classes: [], selectedClassId: qsClassId || null,
+    chapters: [], selectedChapters: {}, chaptersLoading: false, chaptersGeneratedBy: null,
+    selectedMarks: '25', blueprintOptions: [],
+    advOpen: false, medium: user.medium || 'English', difficulty: user.difficulty || 'Balanced',
+    instrDraft: '', customInstructions: [],
+    // review state
+    assessment: null, generatedBy: null, cost: null, balance: null,
+    hoveredId: null, regenOpenId: null, swapOpenId: null, editingId: null, editDraft: '',
+    flashing: {}, showKey: false, saveState: null
+  };
+
+  async function boot() {
+    const [{ classes }, { marksOptions }] = await Promise.all([api('/classes'), api('/assessments/blueprints')]);
+    st.classes = classes;
+    st.blueprintOptions = marksOptions;
+    if (!st.selectedClassId && classes.length) st.selectedClassId = classes[0].id;
+    await loadChapters();
+    render();
+  }
+
+  async function loadChapters() {
+    if (!st.selectedClassId) { st.chapters = []; return; }
+    st.chaptersLoading = true;
+    render();
+    try {
+      const { chapters, generatedBy } = await api(`/classes/${st.selectedClassId}/chapters`);
+      st.chapters = chapters;
+      st.chaptersGeneratedBy = generatedBy;
+      // Default-select the first two chapters, same spirit as the mock's preset.
+      if (!Object.keys(st.selectedChapters).length) {
+        chapters.slice(0, 2).forEach((c) => (st.selectedChapters[c.name] = true));
+      }
+      if (generatedBy) toast(generatedBy === 'gemini' ? 'Syllabus researched with AI and saved for this class' : 'Syllabus filled in offline — set GEMINI_API_KEY for a researched syllabus');
+    } catch (e) {
+      errorToast(e);
+      st.chapters = [];
+    } finally {
+      st.chaptersLoading = false;
+    }
+  }
+
+  function selClass() { return st.classes.find((c) => c.id === st.selectedClassId); }
+
+  function render() {
+    if (st.stage === 'setup') return renderSetup();
+    if (st.stage === 'generating') return renderGenerating();
+    renderReview();
+  }
+
+  /* --------------------------------------------------------------- setup */
+
+  function renderSetup() {
+    const cls = selClass();
+    const selChapters = st.chapters.filter((c) => st.selectedChapters[c.name]);
+    const chCount = selChapters.length;
+    const topicsSum = selChapters.reduce((a, c) => a + (c.topics || 0), 0);
+    const chapterSummary = chCount === 0 ? 'Select at least one chapter to continue.'
+      : `${chCount} chapter${chCount > 1 ? 's' : ''} · ${topicsSum} topics`;
+    const bp = st.blueprintOptions.find((b) => String(b.marks) === st.selectedMarks) || st.blueprintOptions[0] || {};
+    const generateDisabled = chCount === 0 || !cls;
+
+    main.innerHTML = `
+      <div style="width:100%;max-width:740px;margin:0 auto;display:flex;flex-direction:column;gap:18px;animation:rise .3s ease;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <h1 style="margin:0;font-family:'Source Serif 4',serif;font-size:27px;font-weight:600;letter-spacing:-0.01em;color:#0F4C4F;">New question paper</h1>
+          <p style="margin:0;font-size:14px;color:#6E675C;line-height:1.5;">Three choices, one click — Staffroom already knows your board, classes and syllabus.</p>
+        </div>
+
+        <section class="sr-card" style="padding:18px 20px;display:flex;flex-direction:column;gap:12px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">FOR CLASS</span>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;" id="classPicker">
+            ${st.classes.map((c) => `
+              <button data-cls="${c.id}" style="display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:10px 14px;border-radius:9px;cursor:pointer;font-family:inherit;text-align:left;${c.id === st.selectedClassId ? 'border:1px solid #0F4C4F;box-shadow:0 0 0 1px #0F4C4F inset;background:#E6EFEE;color:#0F4C4F;' : 'border:1px solid #DCD5C3;background:#FBF9F2;color:#4A4437;'}">
+                <span style="font-size:13.5px;font-weight:600;">${esc(c.key)}</span>
+                <span style="font-size:11.5px;opacity:0.72;">${esc(c.subject)} · ${c.students} students</span>
+              </button>`).join('') || '<span style="font-size:13px;color:#8A8272;">No classes yet — add one from Classes &amp; Subjects.</span>'}
+          </div>
+        </section>
+
+        <section class="sr-card" style="padding:18px 20px;display:flex;flex-direction:column;gap:12px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">CHAPTERS TO COVER</span>
+          ${st.chaptersLoading ? `
+          <div style="display:flex;align-items:center;gap:10px;padding:4px 0;">
+            <span class="sr-spinner" style="width:16px;height:16px;border-width:2px;"></span>
+            <span style="font-size:13px;color:#6E675C;">Researching the syllabus for this class…</span>
+          </div>` : `
+          <div style="display:flex;flex-wrap:wrap;gap:8px;" id="chapterPicker">
+            ${st.chapters.map((c) => `
+              <button data-ch="${esc(c.name)}" style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:99px;font-size:13px;font-family:inherit;cursor:pointer;${st.selectedChapters[c.name] ? 'background:#0F4C4F;border:1px solid #0F4C4F;color:#F5F2E9;' : 'background:#FBF9F2;border:1px solid #DCD5C3;color:#4A4437;'}">
+                <span>${esc(c.name)}</span><span style="font-size:11.5px;opacity:0.62;">· ${c.topics || 0} topics</span>
+              </button>`).join('') || '<span style="font-size:13px;color:#8A8272;">No chapters found for this class.</span>'}
+          </div>
+          <span style="font-size:12.5px;color:#8A8272;">${chapterSummary}${st.chaptersGeneratedBy === 'gemini' ? ' · researched by AI' : ''}</span>`}
+        </section>
+
+        <section class="sr-card" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">MARKS &amp; PATTERN</span>
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <div class="sr-seg" id="marksPicker">${st.blueprintOptions.map((m) => `<button data-marks="${m.marks}" class="${String(m.marks) === st.selectedMarks ? 'active' : ''}">${m.marks}</button>`).join('')}</div>
+            <span style="font-size:12.5px;color:#6E675C;">Duration <strong style="color:#2B2B2B;">${bp.duration || ''}</strong> · suggested for ${st.selectedMarks} marks</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#F5F2E9;border:1px solid #E4DECD;border-radius:8px;font-size:12.5px;color:#5A5546;">
+            <span style="font-weight:600;color:#2B2B2B;">Blueprint</span><span>${bp.summary || ''} — CBSE Periodic Test pattern</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:#8A8272;">
+            <span style="width:6px;height:6px;border-radius:99px;background:#C6922E;"></span>
+            <span>Costs ${bp.cost || ''} credits · questions are also saved to your Question Bank.</span>
+          </div>
+        </section>
+
+        <section class="sr-card" style="padding:16px 20px;display:flex;flex-direction:column;">
+          <div id="advToggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <div style="display:flex;align-items:baseline;gap:10px;">
+              <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">Advanced options</span>
+              <span style="font-size:12.5px;color:#8A8272;">${st.difficulty} difficulty · ${st.medium} medium</span>
+            </div>
+            <span style="font-size:11px;color:#8A8272;">${st.advOpen ? '▲' : '▼'}</span>
+          </div>
+          ${st.advOpen ? `
+          <div style="display:flex;flex-direction:column;gap:14px;border-top:1px solid #E4DECD;margin-top:14px;padding-top:14px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span style="width:118px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Medium</span>
+              <div class="sr-seg" id="mediumPicker">${['English', 'हिन्दी'].map((m) => `<button data-medium="${m}" class="${m === st.medium ? 'active' : ''}">${m}</button>`).join('')}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span style="width:118px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Difficulty</span>
+              <div class="sr-seg" id="diffPicker">${['Gentle', 'Balanced', 'Challenge'].map((d) => `<button data-diff="${d}" class="${d === st.difficulty ? 'active' : ''}">${d}</button>`).join('')}</div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:12px;">
+              <span style="width:118px;flex-shrink:0;font-size:12.5px;color:#6E675C;padding-top:9px;">Instructions</span>
+              <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+                <input type="text" id="instrInput" value="${esc(st.instrDraft)}" placeholder="e.g. Include one numerical on the mirror formula — press Enter to add" style="flex:1;border:1px solid #DCD5C3;border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;color:#2B2B2B;background:#FBF9F2;outline:none;">
+                ${st.customInstructions.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${st.customInstructions.map((t, i) => `
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#4A4437;background:#F5F2E9;border:1px solid #E4DECD;border-radius:99px;padding:4px 6px 4px 11px;">${esc(t)}<button data-remove-instr="${i}" style="border:none;background:transparent;cursor:pointer;color:#8A8272;font-size:13px;line-height:1;padding:0 2px;">×</button></span>`).join('')}</div>` : ''}
+              </div>
+            </div>
+          </div>` : ''}
+        </section>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:4px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#6E675C;">
+            <span>Every question is tagged and saved to your Question Bank.</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
+            <button id="btnGenerate" ${generateDisabled ? 'disabled' : ''} class="sr-btn-primary" style="display:flex;align-items:center;gap:9px;padding:12px 22px;font-size:14.5px;">
+              <span>Generate paper</span><span style="font-size:15px;">→</span>
+            </button>
+            <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8A8272;">
+              <span style="width:6px;height:6px;border-radius:99px;background:#C6922E;"></span>
+              <span>Uses ≈ ${bp.cost || ''} credits · you have ${Math.round(user.credits).toLocaleString()}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('classPicker').querySelectorAll('[data-cls]').forEach((el) => el.onclick = async () => {
+      st.selectedClassId = el.dataset.cls;
+      st.selectedChapters = {};
+      await loadChapters();
+      render();
+    });
+    document.getElementById('chapterPicker')?.querySelectorAll('[data-ch]').forEach((el) => el.onclick = () => {
+      st.selectedChapters[el.dataset.ch] = !st.selectedChapters[el.dataset.ch];
+      render();
+    });
+    document.getElementById('marksPicker').querySelectorAll('[data-marks]').forEach((el) => el.onclick = () => { st.selectedMarks = el.dataset.marks; render(); });
+    document.getElementById('advToggle').onclick = () => { st.advOpen = !st.advOpen; render(); };
+    const mediumPicker = document.getElementById('mediumPicker');
+    if (mediumPicker) mediumPicker.querySelectorAll('[data-medium]').forEach((el) => el.onclick = () => { st.medium = el.dataset.medium; render(); });
+    const diffPicker = document.getElementById('diffPicker');
+    if (diffPicker) diffPicker.querySelectorAll('[data-diff]').forEach((el) => el.onclick = () => { st.difficulty = el.dataset.diff; render(); });
+    const instrInput = document.getElementById('instrInput');
+    if (instrInput) {
+      instrInput.oninput = (e) => (st.instrDraft = e.target.value);
+      instrInput.onkeydown = (e) => {
+        if (e.key !== 'Enter') return;
+        const v = st.instrDraft.trim();
+        if (!v) return;
+        st.customInstructions.push(v);
+        st.instrDraft = '';
+        render();
+      };
+    }
+    main.querySelectorAll('[data-remove-instr]').forEach((el) => el.onclick = () => { st.customInstructions.splice(Number(el.dataset.removeInstr), 1); render(); });
+
+    const btnGenerate = document.getElementById('btnGenerate');
+    if (!generateDisabled) btnGenerate.onclick = startGeneration;
+  }
+
+  /* ---------------------------------------------------------- generating */
+
+  const STEP_DEFS = [
+    { label: 'Reading the syllabus', ms: 900 },
+    { label: 'Framing the blueprint', ms: 1600 },
+    { label: 'Writing questions', ms: 2600 },
+    { label: 'Checking totals, difficulty and repeats', ms: 900 },
+    { label: 'Preparing the answer key', ms: 600 }
+  ];
+  let genTimer = null, genStepIndex = 0;
+
+  function renderGenerating() {
+    const cls = selClass();
+    main.innerHTML = `
+      <div style="width:100%;max-width:560px;margin:40px auto 0 auto;display:flex;flex-direction:column;gap:16px;animation:rise .3s ease;">
+        <div class="sr-card" style="padding:26px;display:flex;flex-direction:column;gap:20px;">
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <h2 style="margin:0;font-family:'Source Serif 4',serif;font-size:21px;font-weight:600;color:#0F4C4F;">Writing your paper</h2>
+            <span style="font-size:13px;color:#6E675C;">${cls ? esc(cls.key) + ' · ' + esc(cls.subject) : ''} · ${st.selectedMarks} marks · CBSE pattern</span>
+          </div>
+          <div style="height:6px;border-radius:99px;background:#E4DECD;overflow:hidden;"><div id="genBar" style="height:6px;border-radius:99px;background:#0F4C4F;transition:width .45s ease;width:6%;"></div></div>
+          <div id="genSteps" style="display:flex;flex-direction:column;"></div>
+          <div style="display:flex;gap:8px;padding:12px;background:#F5F2E9;border:1px solid #E4DECD;border-radius:8px;font-size:12.5px;color:#6E675C;line-height:1.5;">
+            <span>Credits are charged only if generation succeeds.</span>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:center;"><a href="#" id="cancelGen" style="font-size:12.5px;color:#8A8272;">Cancel and go back</a></div>
+      </div>
+    `;
+    document.getElementById('cancelGen').onclick = (e) => { e.preventDefault(); clearInterval(genTimer); st.stage = 'setup'; render(); };
+    renderGenSteps();
+  }
+
+  function renderGenSteps() {
+    const bar = document.getElementById('genBar');
+    if (bar) bar.style.width = Math.min(96, 6 + genStepIndex * 18) + '%';
+    const el = document.getElementById('genSteps');
+    if (!el) return;
+    el.innerHTML = STEP_DEFS.map((s, i) => `
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:9px 0;">
+        <div style="width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+          ${i < genStepIndex ? `<svg width="17" height="17" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>`
+            : i === genStepIndex ? `<span style="width:10px;height:10px;border-radius:99px;background:#0F4C4F;animation:pulseDot 1.1s ease infinite;"></span>`
+            : `<span style="width:9px;height:9px;border-radius:99px;border:1.4px solid #D9D2C5;"></span>`}
+        </div>
+        <span style="font-size:13.5px;font-weight:${i === genStepIndex ? '600' : '500'};color:${i < genStepIndex ? '#2B2B2B' : i === genStepIndex ? '#0F4C4F' : '#8A8272'};">${s.label}</span>
+      </div>`).join('');
+  }
+
+  async function startGeneration() {
+    st.stage = 'generating';
+    genStepIndex = 0;
+    render();
+    clearInterval(genTimer);
+    genTimer = setInterval(() => { if (genStepIndex < STEP_DEFS.length - 1) { genStepIndex++; renderGenSteps(); } }, 900);
+
+    const chapters = Object.keys(st.selectedChapters).filter((k) => st.selectedChapters[k]);
+    const start = Date.now();
+    try {
+      const res = await api('/assessments/generate', {
+        method: 'POST',
+        body: {
+          classId: st.selectedClassId, totalMarks: Number(st.selectedMarks), chapters,
+          difficulty: st.difficulty, medium: st.medium, customInstructions: st.customInstructions
+        }
+      });
+      const elapsed = Date.now() - start;
+      const minDisplay = 1800;
+      if (elapsed < minDisplay) await new Promise((r) => setTimeout(r, minDisplay - elapsed));
+      clearInterval(genTimer);
+      genStepIndex = STEP_DEFS.length;
+      st.assessment = res.assessment;
+      st.generatedBy = res.generatedBy;
+      st.cost = res.cost;
+      st.balance = res.balance;
+      refreshCreditChips(res.balance);
+      st.showKey = false; st.saveState = null;
+      st.stage = 'review';
+      render();
+    } catch (e) {
+      clearInterval(genTimer);
+      st.stage = 'setup';
+      render();
+      errorToast(e);
+    }
+  }
+
+  /* --------------------------------------------------------------- review */
+
+  const SECTION_TITLES = { A: 'SECTION A', B: 'SECTION B', C: 'SECTION C', D: 'SECTION D', E: 'SECTION E' };
+
+  function renderReview() {
+    const a = st.assessment;
+    const cls = selClass();
+    const questions = a.questions;
+    const totalMarks = questions.reduce((s, q) => s + q.marks, 0);
+    const sections = [...new Set(questions.map((q) => q.section))].sort();
+    const chapters = a.chapters || [];
+    const diffCounts = { Easy: 0, Medium: 0, Hard: 0 };
+    questions.forEach((q) => { if (diffCounts[q.difficulty] !== undefined) diffCounts[q.difficulty]++; });
+    const diffTotal = questions.length || 1;
+
+    const school = user.school || 'Your School';
+    const hi = a.medium !== 'English';
+    const pHeader = {
+      school: school.toUpperCase(), title: a.title.toUpperCase(), subject: `${a.subject.toUpperCase()} · CLASS ${cls ? cls.grade : ''}`,
+      time: `Time allowed: ${a.duration || ''}`, mm: `Maximum marks: ${a.totalMarks}`,
+      instTitle: hi ? 'सामान्य निर्देश:' : 'General instructions:', ansWord: hi ? 'उत्तर.' : 'Ans.',
+      end: hi ? '— प्रश्न-पत्र समाप्त —' : '— End of paper —'
+    };
+
+    main.innerHTML = `
+      <div style="width:100%;display:flex;flex-direction:column;gap:18px;animation:rise .3s ease;">
+        <div style="display:flex;align-items:center;gap:10px;background:#EDF1ED;border:1px solid #D6DFD6;border-radius:10px;padding:12px 16px;" class="sr-hide-print">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span style="font-size:13.5px;color:#3E5240;"><strong>Paper ready.</strong> ${st.cost} credits used · balance ${Math.round(st.balance).toLocaleString()}${st.generatedBy === 'offline' ? ' · offline mode (set GEMINI_API_KEY for AI-written questions)' : ''}</span>
+          <span style="flex:1;"></span>
+          <a href="question-bank.html" style="font-size:13px;font-weight:600;color:#0F4C4F;">${questions.length} questions saved to Question Bank →</a>
+        </div>
+        <div style="display:flex;gap:22px;align-items:flex-start;">
+          <article class="sr-print-area" style="flex:1;min-width:0;background:#FFFFFF;border:1px solid #DCD5C3;border-radius:6px;box-shadow:0 1px 3px rgba(15,76,79,0.06);padding:44px 48px;font-family:'Source Serif 4','Noto Serif Devanagari',serif;color:#232323;line-height:1.65;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;">
+              <span style="font-size:15px;font-weight:700;letter-spacing:0.04em;">${esc(pHeader.school)}</span>
+              <span style="font-size:14px;font-weight:600;">${esc(pHeader.title)}</span>
+              <span style="font-size:13.5px;">${esc(pHeader.subject)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:13px;">
+              <span>${esc(pHeader.time)}</span><span style="font-weight:600;">${esc(pHeader.mm)}</span>
+            </div>
+            <div style="border-top:3px double #2B2B2B;margin:10px 0 14px 0;"></div>
+            <div style="font-size:12.8px;">
+              <span style="font-weight:600;">${esc(pHeader.instTitle)}</span>
+              <ol style="margin:6px 0 0 0;padding:0 0 0 20px;display:flex;flex-direction:column;gap:3px;">
+                ${(a.instructions || []).map((inst) => `<li>${esc(inst)}</li>`).join('')}
+              </ol>
+            </div>
+            ${sections.map((secKey) => {
+              const list = questions.filter((q) => q.section === secKey);
+              const marks = list[0]?.marks;
+              return `
+              <div style="margin-top:24px;">
+                <div style="text-align:center;font-size:13px;font-weight:700;letter-spacing:0.08em;">${SECTION_TITLES[secKey] || 'SECTION ' + secKey}</div>
+                <div style="text-align:center;font-size:12px;font-style:italic;color:#6E675C;margin:2px 0 10px 0;">(${list.length} question${list.length > 1 ? 's' : ''}, ${marks} mark${marks > 1 ? 's' : ''} each)</div>
+                ${list.map((q) => questionBlock(q)).join('')}
+              </div>`;
+            }).join('')}
+            <div style="text-align:center;font-size:12px;letter-spacing:0.06em;color:#8A8272;margin-top:28px;">${esc(pHeader.end)}</div>
+          </article>
+
+          <div class="sr-hide-print" style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;">
+            <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:11px;">
+              <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">PAPER CHECKS</span>
+              <div style="display:flex;gap:9px;align-items:center;font-size:13px;color:#2B2B2B;">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                <span>Marks add up — ${totalMarks} / ${a.totalMarks}</span>
+              </div>
+              <div style="display:flex;gap:9px;align-items:center;font-size:13px;color:#2B2B2B;">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                <span>Every question tagged to the ${cls ? esc(cls.board) : 'CBSE'} syllabus</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:2px;">
+                <span style="font-size:12px;color:#8A8272;">Difficulty spread</span>
+                <div style="display:flex;height:8px;border-radius:99px;overflow:hidden;">
+                  <span style="width:${(diffCounts.Easy / diffTotal) * 100}%;background:#C9D6CA;"></span>
+                  <span style="width:${(diffCounts.Medium / diffTotal) * 100}%;background:#B7C2D6;"></span>
+                  <span style="width:${(diffCounts.Hard / diffTotal) * 100}%;background:#DCB49F;"></span>
+                </div>
+                <span style="font-size:11px;color:#8A8272;">Easy ${diffCounts.Easy} · Medium ${diffCounts.Medium} · Hard ${diffCounts.Hard}</span>
+              </div>
+            </div>
+
+            <div class="sr-card" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">
+              <div style="display:flex;flex-direction:column;gap:2px;"><span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">Answer key</span><span style="font-size:12px;color:#8A8272;">Show inline under each question</span></div>
+              <button id="toggleKey" style="width:38px;height:22px;border-radius:99px;border:none;cursor:pointer;position:relative;background:${st.showKey ? '#0F4C4F' : '#D9D2C5'};transition:background .2s;">
+                <span style="position:absolute;top:2px;width:18px;height:18px;border-radius:99px;background:#FFFFFF;box-shadow:0 1px 3px rgba(0,0,0,0.25);transition:left .2s;left:${st.showKey ? '18px' : '2px'};"></span>
+              </button>
+            </div>
+
+            <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:9px;">
+              <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">SYLLABUS COVERAGE</span>
+              ${chapters.map((ch) => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:#2B2B2B;"><span>${esc(ch)}</span><span style="font-weight:600;flex-shrink:0;">${questions.filter((q) => q.topic && ch.toLowerCase().includes(String(q.topic).split(' ')[0].toLowerCase())).length || '—'} Qs</span></div>`).join('')}
+            </div>
+
+            <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:9px;">
+              ${st.saveState ? `
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    <span style="font-size:13px;color:#3E5240;">${st.saveState === 'saved' ? `Saved — ${esc(a.status)}` : 'Kept as draft — find it under Assessments'}</span>
+                  </div>
+                  <a href="#" id="undoSave" style="font-size:12px;color:#8A8272;">Undo</a>
+                </div>` : `
+                <button id="btnSaveFinal" style="width:100%;background:#0F4C4F;color:#F5F2E9;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Save &amp; finalize${cls ? ' for ' + esc(cls.key) : ''}</button>
+                <div style="display:flex;gap:8px;">
+                  <button id="btnExport" class="sr-btn-secondary" style="flex:1;">Export PDF</button>
+                  <button id="btnPrint" class="sr-btn-secondary" style="flex:1;">Print</button>
+                </div>
+                <a href="#" id="btnDraft" style="text-align:center;font-size:12.5px;color:#8A8272;">Keep as draft</a>`}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    wireReviewHandlers();
+  }
+
+  function questionBlock(q) {
+    const bg = st.hoveredId === q.id || st.regenOpenId === q.id || st.swapOpenId === q.id || st.editingId === q.id ? '#F8F4E9' : 'transparent';
+    const editing = st.editingId === q.id;
+    const diffColor = q.difficulty === 'Hard' ? '#A2593F' : '#8A8272';
+    return `
+    <div data-q="${q.id}" data-hover-zone style="position:relative;border-radius:6px;padding:9px 10px;margin:0 -10px;background:${bg};transition:background .15s;">
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        <span style="font-weight:600;min-width:24px;">${q.position}.</span>
+        <div style="flex:1;">
+          ${editing ? `
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <textarea id="editArea-${q.id}" rows="3" style="width:100%;font-family:inherit;font-size:14.2px;color:#2B2B2B;border:1px solid #C9C2B2;border-radius:7px;padding:8px 10px;resize:vertical;background:#FFFFFF;outline:none;">${esc(q.text)}</textarea>
+            <div style="display:flex;gap:8px;">
+              <button data-save-edit="${q.id}" style="background:#0F4C4F;color:#F5F2E9;border:none;border-radius:6px;padding:6px 14px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;">Save</button>
+              <button data-cancel-edit="${q.id}" style="background:#FFFFFF;color:#4A4437;border:1px solid #D9D2C5;border-radius:6px;padding:6px 14px;font-size:12.5px;font-family:inherit;cursor:pointer;">Cancel</button>
+            </div>
+          </div>` : `<div style="font-size:14.2px;animation:${st.flashing[q.id] ? 'qflash .7s ease' : 'none'};">${esc(q.text)}</div>`}
+        </div>
+        <span style="min-width:34px;text-align:right;font-weight:600;font-size:13.5px;">[${q.marks}]</span>
+      </div>
+      <div style="display:flex;gap:6px;margin:6px 0 0 32px;font-family:'IBM Plex Sans',sans-serif;">
+        <span style="font-size:10.5px;letter-spacing:0.05em;text-transform:uppercase;color:#8A8272;background:#F5F2E9;border:1px solid #E4DECD;border-radius:5px;padding:2px 7px;">${esc(q.topic || '')}</span>
+        <span style="font-size:10.5px;letter-spacing:0.05em;text-transform:uppercase;color:${diffColor};background:#F5F2E9;border:1px solid #E4DECD;border-radius:5px;padding:2px 7px;">${esc(q.difficulty || '')}</span>
+      </div>
+      ${st.showKey ? `<div style="margin:9px 0 2px 32px;padding:9px 12px;background:#EDF1ED;border:1px solid #D6DFD6;border-radius:6px;font-size:13.2px;line-height:1.55;color:#37452F;"><strong>${st.assessment.medium !== 'English' ? 'उत्तर.' : 'Ans.'}</strong> ${esc(q.answer)}</div>` : ''}
+      ${!editing && st.hoveredId === q.id ? `
+      <div class="sr-hide-print" style="position:absolute;top:-13px;right:8px;display:flex;gap:2px;background:#FFFFFF;border:1px solid #DCD5C3;border-radius:8px;padding:3px;box-shadow:0 2px 6px rgba(15,76,79,0.09);font-family:'IBM Plex Sans',sans-serif;">
+        <button data-open-regen="${q.id}" title="Regenerate this question" style="width:26px;height:26px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-size:13.5px;color:#0F4C4F;">↻</button>
+        <button data-open-edit="${q.id}" title="Edit question" style="width:26px;height:26px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-size:13px;color:#0F4C4F;">✎</button>
+        <button data-open-swap="${q.id}" title="Swap from Question Bank" style="width:26px;height:26px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-size:13px;color:#0F4C4F;">⇄</button>
+      </div>` : ''}
+      ${st.regenOpenId === q.id ? `
+      <div class="sr-hide-print" style="margin:10px 0 2px 32px;border:1px solid #DCD5C3;border-radius:9px;padding:12px 14px;background:#F9F6EE;font-family:'IBM Plex Sans',sans-serif;display:flex;flex-direction:column;gap:9px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span style="font-size:12.5px;color:#5A5546;">Regenerate — same topic, same marks</span>
+          <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#8A8272;"><span style="width:5px;height:5px;border-radius:99px;background:#C6922E;"></span>0.4 credits</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button data-regen="${q.id}|similar" style="border:1px solid #0F4C4F;background:#FFFFFF;color:#0F4C4F;font-weight:600;font-size:12.5px;font-family:inherit;border-radius:7px;padding:6px 14px;cursor:pointer;">Similar</button>
+          <button data-regen="${q.id}|easier" style="border:1px solid #D9D2C5;background:#FFFFFF;color:#4A4437;font-size:12.5px;font-family:inherit;border-radius:7px;padding:6px 14px;cursor:pointer;">Easier</button>
+          <button data-regen="${q.id}|harder" style="border:1px solid #D9D2C5;background:#FFFFFF;color:#4A4437;font-size:12.5px;font-family:inherit;border-radius:7px;padding:6px 14px;cursor:pointer;">Harder</button>
+        </div>
+      </div>` : ''}
+      ${st.swapOpenId === q.id ? `
+      <div class="sr-hide-print" style="margin:10px 0 2px 32px;border:1px solid #DCD5C3;border-radius:9px;padding:12px 14px;background:#F9F6EE;font-family:'IBM Plex Sans',sans-serif;display:flex;flex-direction:column;gap:9px;">
+        <span style="font-size:12.5px;color:#5A5546;">From your Question Bank — same topic</span>
+        ${q.variantText ? `
+        <div data-use-bank="${q.id}" style="display:flex;align-items:flex-start;gap:10px;border:1px solid #DCD5C3;border-radius:7px;padding:9px 11px;cursor:pointer;background:#FFFFFF;">
+          <span style="flex:1;font-size:13px;color:#2B2B2B;line-height:1.45;">${esc(q.variantText)}</span>
+          <span style="font-size:11.5px;font-weight:600;color:#0F4C4F;flex-shrink:0;">Use →</span>
+        </div>` : `<span style="font-size:12.5px;color:#8A8272;">No alternative available for this question yet.</span>`}
+        <a href="#" data-close-swap="${q.id}" style="font-size:12px;color:#8A8272;">Cancel</a>
+      </div>` : ''}
+    </div>`;
+  }
+
+  function wireReviewHandlers() {
+    main.querySelectorAll('[data-hover-zone]').forEach((el) => {
+      el.addEventListener('mouseenter', () => { if (st.editingId !== el.dataset.q) { st.hoveredId = el.dataset.q; refreshQuestion(el.dataset.q); } });
+      el.addEventListener('mouseleave', () => { if (st.hoveredId === el.dataset.q) { st.hoveredId = null; refreshQuestion(el.dataset.q); } });
+    });
+    main.querySelectorAll('[data-open-regen]').forEach((el) => el.onclick = () => { st.regenOpenId = st.regenOpenId === el.dataset.openRegen ? null : el.dataset.openRegen; st.swapOpenId = null; st.editingId = null; renderReview(); });
+    main.querySelectorAll('[data-open-swap]').forEach((el) => el.onclick = () => { st.swapOpenId = st.swapOpenId === el.dataset.openSwap ? null : el.dataset.openSwap; st.regenOpenId = null; st.editingId = null; renderReview(); });
+    main.querySelectorAll('[data-open-edit]').forEach((el) => el.onclick = () => { st.editingId = el.dataset.openEdit; st.regenOpenId = null; st.swapOpenId = null; renderReview(); });
+    main.querySelectorAll('[data-cancel-edit]').forEach((el) => el.onclick = () => { st.editingId = null; renderReview(); });
+    main.querySelectorAll('[data-save-edit]').forEach((el) => el.onclick = () => saveEdit(el.dataset.saveEdit));
+    main.querySelectorAll('[data-close-swap]').forEach((el) => el.onclick = (e) => { e.preventDefault(); st.swapOpenId = null; renderReview(); });
+    main.querySelectorAll('[data-use-bank]').forEach((el) => el.onclick = () => useBankAlt(el.dataset.useBank));
+    main.querySelectorAll('[data-regen]').forEach((el) => el.onclick = () => { const [qid, kind] = el.dataset.regen.split('|'); regenerate(qid, kind); });
+
+    const toggleKey = document.getElementById('toggleKey');
+    if (toggleKey) toggleKey.onclick = () => { st.showKey = !st.showKey; renderReview(); };
+    const btnSave = document.getElementById('btnSaveFinal');
+    if (btnSave) btnSave.onclick = () => finalize('Finalized');
+    const btnDraft = document.getElementById('btnDraft');
+    if (btnDraft) btnDraft.onclick = (e) => { e.preventDefault(); finalize('Draft'); };
+    const undoSave = document.getElementById('undoSave');
+    if (undoSave) undoSave.onclick = (e) => { e.preventDefault(); st.saveState = null; renderReview(); };
+    const btnPrint = document.getElementById('btnPrint');
+    if (btnPrint) btnPrint.onclick = () => window.print();
+    const btnExport = document.getElementById('btnExport');
+    if (btnExport) btnExport.onclick = () => { toast('Opening the print dialog — choose "Save as PDF"'); setTimeout(() => window.print(), 350); };
+  }
+
+  function refreshQuestion(qid) {
+    // Cheap targeted re-render of just the hovered question's toolbar, to avoid
+    // losing scroll position on every mouse move.
+    renderReview();
+  }
+
+  async function saveEdit(qid) {
+    const text = document.getElementById(`editArea-${qid}`).value.trim();
+    if (!text) return;
+    try {
+      await api(`/assessments/${st.assessment.id}/questions/${qid}`, { method: 'PATCH', body: { text } });
+      const q = st.assessment.questions.find((x) => x.id === qid);
+      q.text = text;
+      st.editingId = null;
+      toast('Question updated');
+      renderReview();
+    } catch (e) { errorToast(e); }
+  }
+
+  async function useBankAlt(qid) {
+    try {
+      const { question } = await api(`/assessments/${st.assessment.id}/questions/${qid}/swap`, { method: 'POST' });
+      applyQuestionUpdate(qid, question);
+      st.swapOpenId = null;
+      toast('Swapped in from your Question Bank · no credits used');
+      renderReview();
+    } catch (e) { errorToast(e); }
+  }
+
+  async function regenerate(qid, kind) {
+    st.regenOpenId = null;
+    st.flashing[qid] = true;
+    renderReview();
+    try {
+      const res = await api(`/assessments/${st.assessment.id}/questions/${qid}/regenerate`, { method: 'POST', body: { kind } });
+      applyQuestionUpdate(qid, res.question);
+      if (res.balance !== undefined) { st.balance = res.balance; refreshCreditChips(res.balance); }
+      delete st.flashing[qid];
+      renderReview();
+      toast(res.refunded ? 'No AI key configured and no bank alternative — nothing was charged.' : `Question regenerated${res.cost ? ' · ' + res.cost + ' credits used' : ''}`);
+    } catch (e) {
+      delete st.flashing[qid];
+      renderReview();
+      errorToast(e);
+    }
+  }
+
+  function applyQuestionUpdate(qid, updated) {
+    const idx = st.assessment.questions.findIndex((x) => x.id === qid);
+    if (idx !== -1) st.assessment.questions[idx] = { ...st.assessment.questions[idx], ...updated };
+  }
+
+  async function finalize(status) {
+    try {
+      const { assessment } = await api(`/assessments/${st.assessment.id}`, { method: 'PATCH', body: { status } });
+      st.assessment.status = assessment.status;
+      st.saveState = status === 'Finalized' ? 'saved' : 'draft';
+      renderReview();
+    } catch (e) { errorToast(e); }
+  }
+
+  await boot();
+})();
+</script>
+</body>
+</html>

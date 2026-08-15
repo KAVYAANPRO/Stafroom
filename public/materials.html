@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Materials — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { main } = await mountShell('materials', 'Materials');
+  main.classList.add('wide');
+
+  const state = { filter: 'All', pickerOpen: false, generating: false, generatingType: '' };
+  let materials = [];
+
+  async function load() {
+    const res = await api('/materials' + (state.filter !== 'All' ? `?type=${encodeURIComponent(state.filter)}` : ''));
+    materials = res.materials;
+    render();
+  }
+
+  function render() {
+    const filterList = ['All', 'NOTES', 'WORKSHEET', 'QUIZ', 'LESSON PLAN'];
+    main.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <h1 class="sr-title">Materials</h1>
+          <p class="sr-subtitle">Notes, worksheets and lesson plans you've generated — all saved and reusable.</p>
+        </div>
+        <div style="position:relative;flex-shrink:0;">
+          <button id="btnNew" class="sr-btn-primary" style="display:flex;align-items:center;gap:7px;"><span style="font-size:15px;">+</span><span>New material</span></button>
+          ${state.pickerOpen ? `
+          <div style="position:absolute;right:0;top:calc(100% + 6px);background:#FFFFFF;border:1px solid #DCD5C3;border-radius:9px;box-shadow:0 8px 24px rgba(15,76,79,0.15);padding:6px;display:flex;flex-direction:column;gap:2px;width:190px;z-index:20;">
+            ${['Notes', 'Worksheet', 'Quiz'].map((t) => `<button data-quick="${t}" style="text-align:left;background:transparent;border:none;border-radius:6px;padding:9px 10px;font-size:13px;font-family:inherit;color:#2B2B2B;cursor:pointer;">${t}</button>`).join('')}
+          </div>` : ''}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${filterList.map((f) => `<button data-filter="${f}" class="sr-chip${state.filter === f ? ' active' : ''}">${f}</button>`).join('')}
+      </div>
+
+      ${state.generating ? `
+      <div class="sr-card" style="padding:16px;display:flex;align-items:center;gap:12px;animation:rise .2s ease;">
+        <span class="sr-spinner"></span>
+        <span style="font-size:13.5px;color:#2B2B2B;">Generating ${state.generatingType} — this'll appear below in a moment…</span>
+      </div>` : ''}
+
+      <div id="matGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
+    `;
+
+    document.getElementById('btnNew').onclick = () => { state.pickerOpen = !state.pickerOpen; render(); };
+    main.querySelectorAll('[data-quick]').forEach((el) => el.onclick = () => quickGenerate(el.dataset.quick));
+    main.querySelectorAll('[data-filter]').forEach((el) => el.onclick = () => { state.filter = el.dataset.filter; load(); });
+
+    renderGrid();
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById('matGrid');
+    if (!materials.length) {
+      grid.outerHTML = `<div id="matGrid"><div class="sr-card" style="text-align:center;padding:40px 0;color:#8A8272;font-size:13.5px;grid-column:1/-1;">No materials of this type yet.</div></div>`;
+      return;
+    }
+    grid.innerHTML = materials.map((m) => `
+      <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+          <span style="font-size:10.5px;font-weight:600;letter-spacing:0.05em;color:#8C6A1E;background:#F3E6C7;border-radius:5px;padding:2px 7px;">${esc(m.type)}</span>
+          <span style="font-size:11.5px;color:#8A8272;">${relTime(m.createdAt)}</span>
+        </div>
+        <span style="font-family:'Source Serif 4',serif;font-size:16px;font-weight:600;color:#0F4C4F;line-height:1.3;">${esc(m.title)}</span>
+        <span style="font-size:12.5px;color:#6E675C;">${esc(m.chapter || m.concept || '')}</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <button data-view="${m.id}" style="flex:1;background:#F5F2E9;border:1px solid #E4DECD;color:#2B2B2B;border-radius:6px;padding:7px;font-size:12px;font-family:inherit;cursor:pointer;">View</button>
+          <button data-dup="${m.id}" style="flex:1;background:#F5F2E9;border:1px solid #E4DECD;color:#2B2B2B;border-radius:6px;padding:7px;font-size:12px;font-family:inherit;cursor:pointer;">Duplicate</button>
+          <button data-del="${m.id}" style="background:#F5F2E9;border:1px solid #E4DECD;color:#A2593F;border-radius:6px;padding:7px 10px;font-size:12px;font-family:inherit;cursor:pointer;">✕</button>
+        </div>
+      </div>`).join('');
+
+    grid.querySelectorAll('[data-view]').forEach((el) => el.onclick = () => viewMaterial(el.dataset.view));
+    grid.querySelectorAll('[data-dup]').forEach((el) => el.onclick = () => duplicateMaterial(el.dataset.dup));
+    grid.querySelectorAll('[data-del]').forEach((el) => el.onclick = () => deleteMaterial(el.dataset.del));
+  }
+
+  function viewMaterial(id) {
+    const m = materials.find((x) => x.id === id);
+    if (!m) return;
+    openModal(`
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">${esc(m.type)}</span>
+        <h3 style="margin:0;font-family:'Source Serif 4',serif;font-size:19px;font-weight:600;color:#0F4C4F;">${esc(m.title)}</h3>
+      </div>
+      <div style="white-space:pre-wrap;font-size:13.5px;line-height:1.6;color:#2B2B2B;max-height:50vh;overflow-y:auto;border:1px solid #E4DECD;border-radius:8px;padding:14px;background:#F8F4E9;">${esc(m.body)}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;"><button id="closeView" class="sr-btn-secondary">Close</button></div>
+    `);
+    document.getElementById('closeView').onclick = closeModal;
+  }
+
+  async function duplicateMaterial(id) {
+    try { await api(`/materials/${id}/duplicate`, { method: 'POST' }); toast('Duplicated'); await load(); }
+    catch (e) { errorToast(e); }
+  }
+  async function deleteMaterial(id) {
+    try { await api(`/materials/${id}`, { method: 'DELETE' }); await load(); }
+    catch (e) { errorToast(e); }
+  }
+
+  async function quickGenerate(type) {
+    state.pickerOpen = false; state.generating = true; state.generatingType = type;
+    render();
+    try {
+      const res = await api('/materials/generate', { method: 'POST', body: { type, title: '', chapter: 'General revision' } });
+      refreshCreditChips(res.balance);
+      state.generating = false;
+      materials = [res.material, ...materials];
+      render();
+      toast(`${type} generated${res.generatedBy === 'offline' ? ' (offline mode — set GEMINI_API_KEY for AI content)' : ''}`);
+    } catch (e) {
+      state.generating = false;
+      render();
+      errorToast(e);
+    }
+  }
+
+  function openModal(inner) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sr-modal-backdrop';
+    backdrop.id = 'srModal';
+    backdrop.innerHTML = `<div class="sr-modal">${inner}</div>`;
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+    document.body.appendChild(backdrop);
+  }
+  function closeModal() { document.getElementById('srModal')?.remove(); }
+
+  await load();
+})();
+</script>
+</body>
+</html>

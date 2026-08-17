@@ -15,8 +15,10 @@
   const { main } = await mountShell('analytics', 'Analytics');
   main.classList.add('wide');
 
-  const qsClass = new URLSearchParams(location.search).get('class');
-  const state = { tab: 'class', classId: qsClass || null, studentId: null };
+  const qs = new URLSearchParams(location.search);
+  const qsClass = qs.get('class');
+  const qsStudent = qs.get('student');
+  const state = { tab: qsStudent ? 'student' : 'class', classId: qsClass || null, studentId: qsStudent || null };
   let classes = [], students = [], classData = null, studentData = null;
   let modal = null; // { concept, classId, generating }
 

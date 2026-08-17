@@ -58,7 +58,8 @@ export const COSTS = {
   material_quiz: 3,
   'material_lesson plan': 3,
   practice_worksheet: 2,
-  evaluate_sheet: 1.5
+  evaluate_sheet: 1.5,
+  extract_paper: 2                // reading a teacher's own uploaded question paper
 };
 
 export function paperCost(totalMarks) {

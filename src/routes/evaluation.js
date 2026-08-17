@@ -8,7 +8,7 @@ import { unwrap } from '../lib/supabase.js';
 import { nowIso } from '../lib/ids.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { wrap } from '../lib/middleware.js';
-import { evaluateSheet, evaluateSheetFromFile } from '../lib/ai.js';
+import { evaluateSheet, evaluateSheetFromFile, extractQuestionsFromFile } from '../lib/ai.js';
 import { spend, grant, costOf, requireFeature } from '../lib/credits.js';
 import { recomputeWeakConcepts } from '../lib/analytics.js';
 
@@ -20,6 +20,72 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024, files: 1 }, // 15MB — plenty for a scanned sheet, small enough to not tie up the process
   fileFilter: (req, file, cb) => cb(null, ACCEPTED_MIME.has(file.mimetype))
 });
+
+/** Results dashboard for one assessment — the "Student | Score | ->" table. */
+router.get('/', wrap(async (req, res) => {
+  const { assessmentId } = req.query;
+  if (!assessmentId) throw badRequest('assessmentId is required');
+  const rows = unwrap(await req.supabase
+    .from('results')
+    .select('id, score, max_score, ai_confidence, needs_review, reviewed, evaluated_at, students!inner(id, name)')
+    .eq('user_id', req.user.id).eq('assessment_id', assessmentId)
+    .order('evaluated_at', { ascending: false }));
+  res.json({
+    results: rows.map((r) => ({
+      id: r.id, studentId: r.students.id, studentName: r.students.name,
+      score: r.score, maxScore: r.max_score, aiConfidence: r.ai_confidence,
+      needsReview: r.needs_review, reviewed: r.reviewed, evaluatedAt: r.evaluated_at
+    }))
+  });
+}));
+
+/**
+ * Lets a teacher grade against a paper Staffroom never generated — they
+ * upload the actual question paper (photo/PDF), Gemini reads it into a
+ * gradable structure, and it's saved as a normal assessment so everything
+ * downstream (batch grading, review, analytics) works exactly the same way.
+ */
+router.post('/from-paper', upload.single('file'), wrap(async (req, res) => {
+  requireFeature(req.user, 'evaluator', 'AI Answer Evaluator');
+  if (!req.file) throw badRequest('No file uploaded, or the file type isn’t supported (JPEG/PNG/WEBP/HEIC/PDF only)');
+  const { classId, title } = req.body || {};
+
+  const cls = classId
+    ? (await req.supabase.from('classes').select('*').eq('id', classId).eq('user_id', req.user.id).single()).data
+    : null;
+
+  const cost = costOf('extract_paper');
+  const { balance } = await spend(req.supabase, cost, 'Read uploaded question paper', title || req.file.originalname);
+
+  const questions = await extractQuestionsFromFile({
+    fileBuffer: req.file.buffer, mimeType: req.file.mimetype,
+    board: cls?.board || 'CBSE', grade: cls?.grade || '', subject: cls?.subject || ''
+  });
+
+  if (!questions) {
+    const { balance: refundedBalance } = await grant(req.supabase, cost, 'Refund', 'Could not read the uploaded paper');
+    return res.json({ balance: refundedBalance, cost: 0, refunded: true, error: 'Could not read this file — try a clearer photo or scan.' });
+  }
+
+  const totalMarks = questions.reduce((s, q) => s + q.marks, 0);
+  const now = nowIso();
+  const [assessment] = unwrap(await req.supabase.from('assessments').insert({
+    user_id: req.user.id, class_id: cls?.id || null,
+    title: title?.trim() || req.file.originalname.replace(/\.[^.]+$/, ''),
+    subject: cls?.subject || null, total_marks: totalMarks, duration: null, blueprint: `${questions.length} questions, uploaded paper`,
+    difficulty: 'Balanced', medium: 'English', chapters: [], instructions: [],
+    status: 'Distributed', scheduled_for: null, generated_by: 'uploaded', created_at: now, updated_at: now
+  }).select('*'));
+
+  unwrap(await req.supabase.from('assessment_questions').insert(
+    questions.map((q, i) => ({
+      assessment_id: assessment.id, question_id: null, section: 'A', position: i + 1,
+      marks: q.marks, topic: q.topic, difficulty: 'Medium', text: q.text, answer: q.answer
+    }))
+  ));
+
+  res.status(201).json({ assessment, balance, cost, questionCount: questions.length });
+}));
 
 router.get('/queue', wrap(async (req, res) => {
   const rows = unwrap(await req.supabase
@@ -175,6 +241,35 @@ router.post('/upload', upload.single('file'), wrap(async (req, res) => {
     score: marked.items.reduce((s, it) => s + it.awarded, 0),
     maxScore: marked.items.reduce((s, it) => s + it.max, 0),
     items: marked.items
+  });
+}));
+
+/** Full per-question breakdown for one student's checked sheet — the click-through from the results dashboard. */
+router.get('/:resultId/detail', wrap(async (req, res) => {
+  const { data: r, error } = await req.supabase
+    .from('results')
+    .select('*, students!inner(id, name), assessments!inner(id, title, total_marks)')
+    .eq('id', req.params.resultId).eq('user_id', req.user.id).single();
+  if (error || !r) throw notFound('Result not found');
+
+  const items = unwrap(await req.supabase
+    .from('result_items')
+    .select('*, assessment_questions(position, text, marks, topic)')
+    .eq('result_id', r.id));
+
+  res.json({
+    result: {
+      id: r.id, score: r.score, maxScore: r.max_score, aiConfidence: r.ai_confidence,
+      reviewed: r.reviewed, needsReview: r.needs_review, evaluatedAt: r.evaluated_at
+    },
+    student: { id: r.students.id, name: r.students.name },
+    assessment: { id: r.assessments.id, title: r.assessments.title, totalMarks: r.assessments.total_marks },
+    items: items
+      .sort((a, b) => (a.assessment_questions?.position || 0) - (b.assessment_questions?.position || 0))
+      .map((it) => ({
+        aqId: it.aq_id, position: it.assessment_questions?.position, question: it.assessment_questions?.text,
+        topic: it.topic, awarded: it.awarded, max: it.max_marks, comment: it.comment, confidence: it.confidence
+      }))
   });
 }));
 

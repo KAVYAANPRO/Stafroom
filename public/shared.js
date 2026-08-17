@@ -101,7 +101,7 @@ const NAV_ITEMS = [
   { href: 'classes.html', label: 'Classes &amp; Subjects', key: 'classes' },
   { href: 'question-bank.html', label: 'Question Bank', key: 'question-bank' },
   { href: 'paper-maker.html', label: 'Assessments', key: 'paper-maker' },
-  { href: 'evaluator.html', label: 'Answer Evaluator', key: 'evaluator' },
+  { href: 'evaluator.html', label: 'Evaluation', key: 'evaluator' },
   { href: 'analytics.html', label: 'Analytics', key: 'analytics' },
   { href: 'materials.html', label: 'Materials', key: 'materials' }
 ];

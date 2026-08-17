@@ -33,16 +33,26 @@ Return only JSON matching the requested shape.`;
 async function askJson(prompt, { temperature = 0.7 } = {}) {
   const ai = genai();
   if (!ai) return null;
-  const res = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      systemInstruction: SYSTEM,
-      temperature,
-      responseMimeType: 'application/json'
-    }
-  });
-  return parseJson(res.text);
+  try {
+    const res = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: SYSTEM,
+        temperature,
+        responseMimeType: 'application/json'
+      }
+    });
+    return parseJson(res.text);
+  } catch (err) {
+    // Gemini itself failing (rate limit, transient 503, network blip) is not
+    // the same as "no API key" — but every caller already has an offline
+    // fallback path for a null return, so routing it there is what keeps a
+    // transient outage from becoming an uncaught 500 with credits already
+    // spent and nothing to show for it.
+    console.error('Gemini request failed, falling back:', err?.message || err);
+    return null;
+  }
 }
 
 /**
@@ -53,6 +63,7 @@ async function askJson(prompt, { temperature = 0.7 } = {}) {
 async function askJsonWithFile(prompt, { mimeType, data, temperature = 0.2 } = {}) {
   const ai = genai();
   if (!ai) return null;
+  try {
   const res = await ai.models.generateContent({
     model: MODEL,
     contents: [{
@@ -66,6 +77,10 @@ async function askJsonWithFile(prompt, { mimeType, data, temperature = 0.2 } = {
     }
   });
   return parseJson(res.text);
+  } catch (err) {
+    console.error('Gemini file request failed, falling back:', err?.message || err);
+    return null;
+  }
 }
 
 function parseJson(text) {
@@ -455,6 +470,37 @@ Return JSON: {"name":"...","rollNo":"..."}
 Use "" for either field if it genuinely isn't visible anywhere on the page. Do not guess.`;
   const data = await askJsonWithFile(prompt, { mimeType, data: fileBuffer.toString('base64'), temperature: 0 });
   return { name: String(data?.name || '').trim(), rollNo: String(data?.rollNo || '').trim() };
+}
+
+/**
+ * Reads an uploaded question paper (a teacher's own file, not one Staffroom
+ * generated) and turns it into a gradable structure: question text, marks,
+ * and a marking scheme — most real papers don't ship with an answer key
+ * attached, so where one isn't visible on the page Gemini writes a sensible
+ * one itself, the same way it would when generating a paper from scratch.
+ */
+export async function extractQuestionsFromFile({ fileBuffer, mimeType, board, grade, subject }) {
+  const prompt = `This file is a ${board ? board + ' ' : ''}${grade ? 'class ' + grade + ' ' : ''}${subject || ''} question paper, typed or handwritten.
+
+Read every question on the paper, in order. For each one, work out how many marks it's worth (use marks printed next to the question if shown; otherwise infer a reasonable value from its type and phrasing).
+If a marking scheme / model answer is visible anywhere on the page, use it. If not, write a fair, concise one yourself, as an experienced teacher marking this paper would.
+
+Return JSON: {"questions":[{"position":number,"marks":number,"topic":"short topic label","text":"the question exactly as written","answer":"marking scheme / model answer"}]}
+Number "position" sequentially starting at 1, in the order the questions appear on the paper.`;
+
+  const data = await askJsonWithFile(prompt, { mimeType, data: fileBuffer.toString('base64'), temperature: 0.2 });
+  const questions = Array.isArray(data?.questions) ? data.questions : null;
+  if (!questions || !questions.length) return null;
+
+  return questions
+    .filter((q) => q && q.text)
+    .map((q, i) => ({
+      position: Number(q.position) || i + 1,
+      marks: Math.max(1, Math.round(Number(q.marks)) || 1),
+      topic: String(q.topic || '').slice(0, 120) || 'General',
+      text: String(q.text).trim(),
+      answer: String(q.answer || '').trim()
+    }));
 }
 
 function clamp(n, lo, hi) {

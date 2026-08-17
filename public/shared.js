@@ -29,6 +29,24 @@ async function api(path, opts = {}) {
   return data;
 }
 
+/** Like api(), but for multipart/form-data (file uploads) — no Content-Type
+ * header set manually, since the browser needs to add its own boundary. */
+async function apiUpload(path, formData) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(API + path, { method: 'POST', headers, body: formData });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 /** Redirects to the login page if the visitor isn't signed in; returns the user otherwise. */
 async function requireAuth() {
   try {
@@ -83,6 +101,7 @@ const NAV_ITEMS = [
   { href: 'classes.html', label: 'Classes &amp; Subjects', key: 'classes' },
   { href: 'question-bank.html', label: 'Question Bank', key: 'question-bank' },
   { href: 'paper-maker.html', label: 'Assessments', key: 'paper-maker' },
+  { href: 'evaluator.html', label: 'Answer Evaluator', key: 'evaluator' },
   { href: 'analytics.html', label: 'Analytics', key: 'analytics' },
   { href: 'materials.html', label: 'Materials', key: 'materials' }
 ];
@@ -91,6 +110,7 @@ const NAV_ICONS = {
   dashboard: '<rect x="2" y="2" width="5" height="5" rx="1"></rect><rect x="9" y="2" width="5" height="5" rx="1"></rect><rect x="2" y="9" width="5" height="5" rx="1"></rect><rect x="9" y="9" width="5" height="5" rx="1"></rect>',
   classes: '<rect x="2.5" y="3" width="11" height="7.5" rx="1"></rect><path d="M8 10.5v3M5.5 13.5h5"></path>',
   'question-bank': '<rect x="3" y="2.5" width="10" height="11" rx="1.5"></rect><path d="M6.2 2.5v11"></path>',
+  evaluator: '<path d="M4 2.5h6l2.5 2.5v8.5a1 1 0 0 1-1 1h-7.5a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z"></path><path d="M6 8.5l1.4 1.4L10.5 6.7"></path>',
   'paper-maker': '<rect x="3.5" y="2" width="9" height="12" rx="1.5"></rect><path d="M6 6h4M6 9h2.5"></path>',
   analytics: '<path d="M3.5 13V9M8 13V5.5M12.5 13V3"></path>',
   materials: '<path d="M2.5 12.5v-8a1 1 0 0 1 1-1h3l1.5 2h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"></path>',

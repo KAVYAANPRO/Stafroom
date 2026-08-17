@@ -13,6 +13,10 @@ export function errorHandler(err, req, res, _next) {
     delete extra.stack;
     return res.status(status).json({ error: message, ...extra });
   }
+  if (err?.name === 'MulterError') {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'File is too large (15MB max).' : err.message;
+    return res.status(400).json({ error: msg });
+  }
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 }

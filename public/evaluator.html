@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Answer Evaluator — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .ev-drop { border: 1.5px dashed #DCD5C3; border-radius: 10px; padding: 28px; text-align: center; background: #FBF9F2; cursor: pointer; transition: border-color .15s, background .15s; }
+  .ev-drop.drag { border-color: #0F4C4F; background: #E6EFEE; }
+  .ev-conf-bar { height: 5px; border-radius: 99px; background: #E4DECD; overflow: hidden; width: 100%; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { user, main } = await mountShell('evaluator', 'Answer Evaluator');
+  main.classList.add('wide');
+
+  if (user.plan !== 'Max') {
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Answer Evaluator</h1>
+        <p class="sr-subtitle">Upload a photo or PDF of a student's answer sheet — AI reads it and grades it against your paper.</p>
+      </div>
+      <div class="sr-card" style="padding:32px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">MAX PLAN FEATURE</span>
+        <h2 style="margin:0;font-family:'Source Serif 4',serif;font-size:20px;font-weight:600;color:#0F4C4F;">Upgrade to Max to use the Answer Evaluator</h2>
+        <p style="margin:0;max-width:440px;font-size:13.5px;color:#6E675C;line-height:1.55;">Photo/PDF grading, weak-concept detection and the full remediation loop are part of the Max plan.</p>
+        <a href="credits.html" class="sr-btn-primary" style="text-decoration:none;margin-top:6px;">View plans</a>
+      </div>`;
+    return;
+  }
+
+  const state = {
+    assessments: [], queue: [],
+    assessmentId: null, studentName: '', mode: 'upload', file: null,
+    manualAnswers: {}, evaluating: false, result: null, dragOver: false
+  };
+
+  async function boot() {
+    const [{ assessments }, { queue }] = await Promise.all([api('/assessments'), api('/evaluations/queue')]);
+    state.assessments = assessments.filter((a) => a.status !== 'Draft');
+    state.queue = queue;
+    if (!state.assessmentId && state.assessments.length) state.assessmentId = state.assessments[0].id;
+    await loadAssessmentDetail();
+    render();
+  }
+
+  // The list endpoint doesn't include per-question detail — manual (typed
+  // answer) mode needs the real question text, so fetch it separately
+  // whenever the selected assessment changes.
+  async function loadAssessmentDetail() {
+    if (!state.assessmentId) { state.assessmentDetail = null; return; }
+    try {
+      const { assessment } = await api(`/assessments/${state.assessmentId}`);
+      state.assessmentDetail = assessment;
+    } catch {
+      state.assessmentDetail = null;
+    }
+  }
+
+  function selAssessment() {
+    return state.assessmentDetail && state.assessmentDetail.id === state.assessmentId
+      ? state.assessmentDetail
+      : state.assessments.find((a) => a.id === state.assessmentId);
+  }
+
+  function render() {
+    const a = selAssessment();
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Answer Evaluator</h1>
+        <p class="sr-subtitle">Upload a photo or PDF of a student's answer sheet — AI reads it and grades it against your paper.</p>
+      </div>
+
+      ${state.queue.length ? `
+      <section style="display:flex;flex-direction:column;gap:10px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">NEEDS YOUR REVIEW — LOW AI CONFIDENCE</span>
+        <div class="sr-card" style="overflow:hidden;">
+          ${state.queue.map((q) => `
+            <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid #E4DECD;">
+              <div style="flex:1;display:flex;flex-direction:column;gap:1px;">
+                <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(q.student_name)} · ${esc(q.title)}</span>
+                <span style="font-size:12px;color:#8A8272;">${q.max_score ? Math.round((q.score / q.max_score) * 100) + '%' : '—'} · confidence ${Math.round((q.ai_confidence || 0) * 100)}%</span>
+              </div>
+              <button data-review="${q.id}" class="sr-btn-secondary">Review</button>
+            </div>`).join('')}
+        </div>
+      </section>` : ''}
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:16px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">EVALUATE A NEW SHEET</span>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="sr-field">
+            <span class="label">Assessment</span>
+            <select id="evAssessment">
+              ${state.assessments.length ? state.assessments.map((x) => `<option value="${x.id}" ${x.id === state.assessmentId ? 'selected' : ''}>${esc(x.title)} · ${esc(x.status)}</option>`).join('') : '<option>No assessments yet — create one in Assessments first</option>'}
+            </select>
+          </div>
+          <div class="sr-field">
+            <span class="label">Student name</span>
+            <input type="text" id="evStudent" placeholder="e.g. Rohan S." value="${esc(state.studentName)}">
+          </div>
+        </div>
+
+        <div class="sr-seg" style="align-self:flex-start;">
+          <button id="modeUpload" class="${state.mode === 'upload' ? 'active' : ''}">Upload photo/PDF</button>
+          <button id="modeManual" class="${state.mode === 'manual' ? 'active' : ''}">Type answers</button>
+        </div>
+
+        ${state.mode === 'upload' ? renderUploadMode() : renderManualMode(a)}
+
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:12px;color:#8A8272;">Uses ≈ 1.5 credits · you have ${Math.round(user.credits).toLocaleString()}</span>
+          <button id="evSubmit" class="sr-btn-primary" ${state.evaluating ? 'disabled' : ''}>${state.evaluating ? 'Evaluating…' : 'Evaluate sheet'}</button>
+        </div>
+      </section>
+
+      ${state.result ? renderResult() : ''}
+    `;
+    wire(a);
+  }
+
+  function renderUploadMode() {
+    return `
+      <div id="evDrop" class="ev-drop${state.dragOver ? ' drag' : ''}">
+        <input type="file" id="evFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" style="display:none;">
+        ${state.file
+          ? `<span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(state.file.name)}</span><br><span style="font-size:12px;color:#8A8272;">Click to choose a different file</span>`
+          : `<span style="font-size:13.5px;color:#2B2B2B;font-weight:600;">Drop a photo or PDF here, or click to choose</span><br><span style="font-size:12px;color:#8A8272;">JPEG, PNG, WEBP, HEIC or PDF · up to 15MB</span>`}
+      </div>`;
+  }
+
+  function renderManualMode(a) {
+    if (!a) return `<span style="font-size:13px;color:#8A8272;">Pick an assessment to see its questions.</span>`;
+    return `
+      <div style="display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto;padding-right:4px;">
+        ${(a.questions || []).map((q) => `
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:12.5px;color:#2B2B2B;"><strong>Q${q.position}</strong> (${q.marks} marks) — ${esc(q.text.slice(0, 90))}${q.text.length > 90 ? '…' : ''}</span>
+            <textarea data-manual="${q.id}" rows="2" placeholder="Student's answer…" style="border:1px solid #DCD5C3;border-radius:7px;padding:8px 10px;font-size:13px;font-family:inherit;background:#FBF9F2;outline:none;resize:vertical;">${esc(state.manualAnswers[q.id] || '')}</textarea>
+          </div>`).join('') || '<span style="font-size:13px;color:#8A8272;">This assessment has no questions.</span>'}
+      </div>`;
+  }
+
+  function renderResult() {
+    const r = state.result;
+    if (r.refunded) {
+      return `<div class="sr-card" style="padding:16px 18px;font-size:13.5px;color:#A2593F;background:#F7E9E4;border-color:#EAD1C9;">${esc(r.error)} No credits were charged.</div>`;
+    }
+    return `
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;animation:rise .2s ease;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">RESULT</span>
+          <span style="font-family:'Source Serif 4',serif;font-size:20px;font-weight:600;color:#0F4C4F;">${r.score} / ${r.maxScore}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${r.items.map((it, i) => `
+            <div style="display:flex;flex-direction:column;gap:5px;padding:11px 13px;background:#F5F2E9;border-radius:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12.5px;font-weight:600;color:#2B2B2B;flex:1;">Q${i + 1}${it.topic ? ' — ' + esc(it.topic) : ''}</span>
+                <input data-award="${i}" type="number" min="0" max="${it.max}" step="0.5" value="${it.awarded}" style="width:52px;border:1px solid #DCD5C3;border-radius:6px;padding:4px 6px;font-size:12.5px;text-align:right;">
+                <span style="font-size:12.5px;color:#8A8272;">/ ${it.max}</span>
+              </div>
+              ${it.transcribed ? `<span style="font-size:12px;color:#6E675C;font-style:italic;">"${esc(it.transcribed)}"</span>` : ''}
+              <span style="font-size:12px;color:#8A8272;">${esc(it.comment || '')}</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div class="ev-conf-bar"><div style="height:5px;background:${it.confidence < 0.7 ? '#C1654B' : '#6E8B6F'};width:${Math.round(it.confidence * 100)}%;"></div></div>
+                <span style="font-size:10.5px;color:#8A8272;flex-shrink:0;">${Math.round(it.confidence * 100)}% confident</span>
+              </div>
+            </div>`).join('')}
+        </div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button id="evSaveCorrections" class="sr-btn-primary">Save corrections</button>
+        </div>
+      </section>`;
+  }
+
+  function wire(a) {
+    const assessmentSel = document.getElementById('evAssessment');
+    if (assessmentSel) assessmentSel.onchange = async (e) => {
+      state.assessmentId = e.target.value; state.result = null;
+      await loadAssessmentDetail();
+      render();
+    };
+    const studentInput = document.getElementById('evStudent');
+    if (studentInput) studentInput.oninput = (e) => { state.studentName = e.target.value; };
+
+    document.getElementById('modeUpload').onclick = () => { state.mode = 'upload'; render(); };
+    document.getElementById('modeManual').onclick = () => { state.mode = 'manual'; render(); };
+
+    main.querySelectorAll('[data-review]').forEach((el) => el.onclick = () => openReview(el.dataset.review));
+
+    if (state.mode === 'upload') {
+      const drop = document.getElementById('evDrop');
+      const fileInput = document.getElementById('evFile');
+      drop.onclick = () => fileInput.click();
+      fileInput.onchange = (e) => { state.file = e.target.files[0] || null; render(); };
+      drop.addEventListener('dragover', (e) => { e.preventDefault(); if (!state.dragOver) { state.dragOver = true; render(); } });
+      drop.addEventListener('dragleave', () => { state.dragOver = false; render(); });
+      drop.addEventListener('drop', (e) => {
+        e.preventDefault(); state.dragOver = false;
+        const f = e.dataTransfer.files[0];
+        if (f) { state.file = f; render(); }
+      });
+    } else {
+      main.querySelectorAll('[data-manual]').forEach((el) => el.oninput = (e) => { state.manualAnswers[el.dataset.manual] = e.target.value; });
+    }
+
+    document.getElementById('evSubmit').onclick = () => submit(a);
+
+    const saveBtn = document.getElementById('evSaveCorrections');
+    if (saveBtn) saveBtn.onclick = saveCorrections;
+  }
+
+  async function submit(a) {
+    if (!state.assessmentId) return toast('Pick an assessment first');
+    if (!state.studentName.trim()) return toast('Enter the student’s name');
+
+    state.evaluating = true; state.result = null; render();
+    try {
+      let res;
+      if (state.mode === 'upload') {
+        if (!state.file) { state.evaluating = false; render(); return toast('Choose a photo or PDF first'); }
+        const form = new FormData();
+        form.append('assessmentId', state.assessmentId);
+        form.append('studentName', state.studentName.trim());
+        form.append('file', state.file);
+        res = await apiUpload('/evaluations/upload', form);
+      } else {
+        const answers = (a?.questions || []).map((q) => ({ aqId: q.id, text: state.manualAnswers[q.id] || '' })).filter((x) => x.text.trim());
+        if (!answers.length) { state.evaluating = false; render(); return toast('Type at least one answer'); }
+        res = await api('/evaluations', { method: 'POST', body: { assessmentId: state.assessmentId, studentName: state.studentName.trim(), answers } });
+      }
+      refreshCreditChips(res.balance);
+      state.result = res;
+      if (!res.refunded) toast(`Evaluated · ${res.generatedBy === 'gemini' ? 'AI-graded' : 'offline mode'}`);
+      const q = await api('/evaluations/queue');
+      state.queue = q.queue;
+    } catch (e) {
+      errorToast(e);
+    }
+    state.evaluating = false;
+    render();
+  }
+
+  function openReview(resultId) {
+    openModal(`<div id="reviewBody" style="display:flex;flex-direction:column;gap:12px;"><span style="font-size:13px;color:#8A8272;">Loading…</span></div>`);
+    loadReview(resultId);
+  }
+
+  async function loadReview(resultId) {
+    // The queue list doesn't include per-question detail, so pull it via a
+    // lightweight direct query against the same result the row represents.
+    try {
+      const detail = await api(`/evaluations/${resultId}/detail`).catch(() => null);
+      const body = document.getElementById('reviewBody');
+      if (!body) return;
+      if (!detail) {
+        body.innerHTML = `<span style="font-size:13px;color:#6E675C;">Open this student's result from Analytics to adjust individual marks, then come back here to confirm it's reviewed.</span>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="mCancel" class="sr-btn-secondary">Cancel</button>
+            <button id="mConfirm" class="sr-btn-primary">Mark as reviewed</button>
+          </div>`;
+        document.getElementById('mCancel').onclick = closeModal;
+        document.getElementById('mConfirm').onclick = async () => {
+          try {
+            await api(`/evaluations/${resultId}/review`, { method: 'POST', body: {} });
+            closeModal();
+            toast('Marked as reviewed');
+            const q = await api('/evaluations/queue');
+            state.queue = q.queue;
+            render();
+          } catch (e) { errorToast(e); }
+        };
+      }
+    } catch (e) { errorToast(e); }
+  }
+
+  async function saveCorrections() {
+    const r = state.result;
+    if (!r || !r.resultId) return;
+    const items = r.items.map((it, i) => {
+      const input = document.querySelector(`[data-award="${i}"]`);
+      return { aqId: it.aqId, awarded: input ? Number(input.value) || 0 : it.awarded };
+    }).filter((it) => it.aqId);
+    try {
+      await api(`/evaluations/${r.resultId}/review`, { method: 'POST', body: { items } });
+      toast('Saved');
+      const q = await api('/evaluations/queue');
+      state.queue = q.queue;
+      render();
+    } catch (e) { errorToast(e); }
+  }
+
+  function openModal(inner) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sr-modal-backdrop';
+    backdrop.id = 'srModal';
+    backdrop.innerHTML = `<div class="sr-modal">${inner}</div>`;
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+    document.body.appendChild(backdrop);
+  }
+  function closeModal() { document.getElementById('srModal')?.remove(); }
+
+  await boot();
+})();
+</script>
+</body>
+</html>

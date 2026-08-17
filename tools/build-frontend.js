@@ -13,7 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(ROOT, 'public');
 const required = [
   'index.html', 'login.html', 'dashboard.html', 'classes.html', 'question-bank.html',
-  'paper-maker.html', 'analytics.html', 'materials.html', 'credits.html', 'settings.html',
+  'paper-maker.html', 'evaluator.html', 'analytics.html', 'materials.html', 'credits.html', 'settings.html',
   'shared.js', 'styles.css'
 ];
 

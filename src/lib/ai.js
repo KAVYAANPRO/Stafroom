@@ -45,6 +45,29 @@ async function askJson(prompt, { temperature = 0.7 } = {}) {
   return parseJson(res.text);
 }
 
+/**
+ * Same as askJson, but the prompt is paired with an image/PDF file (Gemini
+ * reads it directly — no separate OCR step). Used by the photo/PDF Answer
+ * Evaluator so handwritten sheets can be graded straight from a scan.
+ */
+async function askJsonWithFile(prompt, { mimeType, data, temperature = 0.2 } = {}) {
+  const ai = genai();
+  if (!ai) return null;
+  const res = await ai.models.generateContent({
+    model: MODEL,
+    contents: [{
+      role: 'user',
+      parts: [{ text: prompt }, { inlineData: { mimeType, data } }]
+    }],
+    config: {
+      systemInstruction: SYSTEM,
+      temperature,
+      responseMimeType: 'application/json'
+    }
+  });
+  return parseJson(res.text);
+}
+
 function parseJson(text) {
   if (!text) return null;
   const cleaned = String(text).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
@@ -370,6 +393,68 @@ The items array must have exactly ${items.length} entries, in order.`;
     })),
     generatedBy: 'offline'
   };
+}
+
+/**
+ * Reads a scanned/photographed answer sheet directly (image or PDF) and
+ * grades it against the assessment's actual questions in one pass — no
+ * separate transcription step. Gemini both transcribes and marks each
+ * numbered answer it can find on the page(s).
+ * @param {{fileBuffer:Buffer, mimeType:string, questions:{aqId:string,position:number,marks:number,topic:string,text:string,answer:string}[], board:string, grade:string, subject:string, medium:string}} opts
+ */
+export async function evaluateSheetFromFile({ fileBuffer, mimeType, questions, board, grade, subject, medium }) {
+  const prompt = `This file is a photographed or scanned answer sheet from a ${board} class ${grade} ${subject} exam, written by hand or typed by a student.
+
+Read the student's answers directly from the file. Match them to the question numbers below by the numbering the student wrote (e.g. "Q3", "3.", "Answer 3") — students may answer out of order or skip questions.
+Medium: ${medium}
+
+Questions on this paper, with the marking scheme and maximum marks for each:
+${questions.map((q) => `Q${q.position} (${q.marks} marks) — topic: ${q.topic}
+Question: ${q.text}
+Marking scheme: ${q.answer}`).join('\n\n')}
+
+For each question above, find the student's answer in the file (if any), award marks per the scheme with partial credit where earned, and note what you actually read.
+"confidence" is 0..1 — use below 0.7 when handwriting is hard to read, the answer is ambiguous, or you could not find that question on the sheet at all (treat a genuinely missing answer as 0 marks, low confidence, and say so in the comment).
+
+Return JSON: {"items":[{"position":number,"transcribed":"what the student actually wrote, briefly","awarded":number,"confidence":number,"comment":"one short line for the teacher"}]}
+The items array must have exactly ${questions.length} entries, one per question above, in the same order.`;
+
+  const data = await askJsonWithFile(prompt, { mimeType, data: fileBuffer.toString('base64'), temperature: 0.15 });
+  const marked = Array.isArray(data?.items) ? data.items : null;
+
+  if (marked && marked.length === questions.length) {
+    return {
+      items: questions.map((q, i) => {
+        const m = marked[i] || {};
+        const awarded = clamp(Number(m.awarded) || 0, 0, q.marks);
+        return {
+          aqId: q.aqId, topic: q.topic, max: q.marks,
+          awarded,
+          confidence: clamp(Number(m.confidence ?? 0.5), 0, 1),
+          comment: String(m.comment || '').slice(0, 300),
+          transcribed: String(m.transcribed || '').slice(0, 500)
+        };
+      }),
+      generatedBy: 'gemini'
+    };
+  }
+
+  return null; // caller decides how to handle "couldn't read this file at all"
+}
+
+/**
+ * Reads just the student-identity header off a sheet (name / roll number) —
+ * used to match an uploaded file to a roster entry before grading it, for
+ * the batch upload modes (ZIP of sheets, or one combined multi-student PDF).
+ */
+export async function extractSheetIdentity({ fileBuffer, mimeType }) {
+  const prompt = `This file is one student's answer sheet from a school exam. Read only the header/cover area
+(the part with the student's name and/or roll number — usually top of the first page).
+
+Return JSON: {"name":"...","rollNo":"..."}
+Use "" for either field if it genuinely isn't visible anywhere on the page. Do not guess.`;
+  const data = await askJsonWithFile(prompt, { mimeType, data: fileBuffer.toString('base64'), temperature: 0 });
+  return { name: String(data?.name || '').trim(), rollNo: String(data?.rollNo || '').trim() };
 }
 
 function clamp(n, lo, hi) {

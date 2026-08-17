@@ -1,16 +1,25 @@
-// AI Answer Evaluator — Max-plan feature. A teacher submits transcribed answers
-// for one student against one assessment; Gemini marks each item and flags any
-// it isn't confident about. Confirmed results feed weak-concept detection.
+// AI Answer Evaluator — Max-plan feature. A teacher submits either transcribed
+// text answers, or a photo/PDF of the actual sheet, for one student against
+// one assessment; Gemini marks each item and flags any it isn't confident
+// about. Confirmed results feed weak-concept detection.
 import { Router } from 'express';
+import multer from 'multer';
 import { unwrap } from '../lib/supabase.js';
 import { nowIso } from '../lib/ids.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { wrap } from '../lib/middleware.js';
-import { evaluateSheet } from '../lib/ai.js';
-import { spend, costOf, requireFeature } from '../lib/credits.js';
+import { evaluateSheet, evaluateSheetFromFile } from '../lib/ai.js';
+import { spend, grant, costOf, requireFeature } from '../lib/credits.js';
 import { recomputeWeakConcepts } from '../lib/analytics.js';
 
 const router = Router();
+
+const ACCEPTED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf']);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 1 }, // 15MB — plenty for a scanned sheet, small enough to not tie up the process
+  fileFilter: (req, file, cb) => cb(null, ACCEPTED_MIME.has(file.mimetype))
+});
 
 router.get('/queue', wrap(async (req, res) => {
   const rows = unwrap(await req.supabase
@@ -25,6 +34,25 @@ router.get('/queue', wrap(async (req, res) => {
     }))
   });
 }));
+
+/** Finds a student by id, or by name (creating a roster entry if needed). */
+async function resolveStudent(req, assessment, studentId, studentName) {
+  let student = studentId
+    ? (await req.supabase.from('students').select('*').eq('id', studentId).eq('user_id', req.user.id).single()).data
+    : null;
+  if (!student && studentName?.trim() && assessment.class_id) {
+    const { data: found } = await req.supabase.from('students').select('*')
+      .eq('class_id', assessment.class_id).eq('name', studentName.trim()).maybeSingle();
+    student = found;
+    if (!student) {
+      const [created] = unwrap(await req.supabase.from('students').insert({
+        user_id: req.user.id, class_id: assessment.class_id, name: studentName.trim(), roll_no: null, created_at: nowIso()
+      }).select('*'));
+      student = created;
+    }
+  }
+  return student;
+}
 
 async function saveResult(req, assessment, student, marked, generatedBy) {
   const now = nowIso();
@@ -71,20 +99,7 @@ router.post('/', wrap(async (req, res) => {
   const { data: assessment, error: aErr } = await req.supabase.from('assessments').select('*').eq('id', assessmentId).eq('user_id', req.user.id).single();
   if (aErr || !assessment) throw notFound('Assessment not found');
 
-  let student = studentId
-    ? (await req.supabase.from('students').select('*').eq('id', studentId).eq('user_id', req.user.id).single()).data
-    : null;
-  if (!student && studentName?.trim() && assessment.class_id) {
-    const { data: found } = await req.supabase.from('students').select('*')
-      .eq('class_id', assessment.class_id).eq('name', studentName.trim()).maybeSingle();
-    student = found;
-    if (!student) {
-      const [created] = unwrap(await req.supabase.from('students').insert({
-        user_id: req.user.id, class_id: assessment.class_id, name: studentName.trim(), roll_no: null, created_at: nowIso()
-      }).select('*'));
-      student = created;
-    }
-  }
+  const student = await resolveStudent(req, assessment, studentId, studentName);
   if (!student) throw badRequest('studentId or studentName is required');
 
   const questions = unwrap(await req.supabase.from('assessment_questions').select('*').eq('assessment_id', assessment.id).order('position'));
@@ -119,13 +134,59 @@ router.post('/', wrap(async (req, res) => {
   });
 }));
 
+/** Same as POST / above, but the sheet is a photo or PDF instead of typed-out text. */
+router.post('/upload', upload.single('file'), wrap(async (req, res) => {
+  requireFeature(req.user, 'evaluator', 'AI Answer Evaluator');
+  const { assessmentId, studentId, studentName } = req.body || {};
+  if (!assessmentId) throw badRequest('assessmentId is required');
+  if (!req.file) throw badRequest('No file uploaded, or the file type isn’t supported (JPEG/PNG/WEBP/HEIC/PDF only)');
+
+  const { data: assessment, error: aErr } = await req.supabase.from('assessments').select('*').eq('id', assessmentId).eq('user_id', req.user.id).single();
+  if (aErr || !assessment) throw notFound('Assessment not found');
+
+  const student = await resolveStudent(req, assessment, studentId, studentName);
+  if (!student) throw badRequest('studentId or studentName is required');
+
+  const questions = unwrap(await req.supabase.from('assessment_questions').select('*').eq('assessment_id', assessment.id).order('position'));
+  if (!questions.length) throw badRequest('This assessment has no questions to grade against');
+  const chapters = assessment.chapters || [];
+
+  const cost = costOf('evaluate');
+  const { balance } = await spend(req.supabase, cost, 'Evaluated answer sheet (upload)', `${assessment.title} · ${student.name}`);
+
+  const outcome = await evaluateSheetFromFile({
+    fileBuffer: req.file.buffer, mimeType: req.file.mimetype,
+    questions: questions.map((q) => ({ aqId: q.id, position: q.position, marks: q.marks, topic: q.topic, text: q.text, answer: q.answer })),
+    board: 'CBSE', grade: '10', subject: assessment.subject, medium: assessment.medium
+  });
+
+  if (!outcome) {
+    // Nothing usable came back (blank/unreadable file, or no key) — refund, nothing saved.
+    const { balance: refundedBalance } = await grant(req.supabase, cost, 'Refund', 'Could not read the uploaded sheet');
+    return res.json({ balance: refundedBalance, cost: 0, refunded: true, error: 'Could not read this file — try a clearer photo or scan.' });
+  }
+
+  const marked = { items: outcome.items.map((it) => ({ ...it, chapter: chapters[0] || '' })) };
+  const resultId = await saveResult(req, assessment, student, marked, outcome.generatedBy);
+  await recomputeWeakConcepts(req.supabase, req.user.id, assessment.class_id);
+
+  res.status(201).json({
+    resultId, balance, cost, generatedBy: outcome.generatedBy,
+    score: marked.items.reduce((s, it) => s + it.awarded, 0),
+    maxScore: marked.items.reduce((s, it) => s + it.max, 0),
+    items: marked.items
+  });
+}));
+
 router.post('/:resultId/review', wrap(async (req, res) => {
   const { data: r, error } = await req.supabase.from('results').select('*').eq('id', req.params.resultId).eq('user_id', req.user.id).single();
   if (error || !r) throw notFound('Result not found');
   const items = Array.isArray(req.body?.items) ? req.body.items : null;
   if (items) {
     for (const it of items) {
-      if (it.id) await req.supabase.from('result_items').update({ awarded: it.awarded }).eq('id', it.id).eq('result_id', r.id);
+      // Matched by aq_id, not the result_item row's own id — the evaluation
+      // response never included that internal id, only the question it's for.
+      if (it.aqId) await req.supabase.from('result_items').update({ awarded: it.awarded }).eq('aq_id', it.aqId).eq('result_id', r.id);
     }
     const rows = unwrap(await req.supabase.from('result_items').select('awarded').eq('result_id', r.id));
     const total = rows.reduce((s, x) => s + Number(x.awarded), 0);

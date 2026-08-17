@@ -103,7 +103,8 @@ const NAV_ITEMS = [
   { href: 'paper-maker.html', label: 'Assessments', key: 'paper-maker' },
   { href: 'evaluator.html', label: 'Evaluation', key: 'evaluator' },
   { href: 'analytics.html', label: 'Analytics', key: 'analytics' },
-  { href: 'materials.html', label: 'Materials', key: 'materials' }
+  { href: 'materials.html', label: 'Materials', key: 'materials' },
+  { href: 'note-maker.html', label: 'Note Maker', key: 'note-maker' }
 ];
 
 const NAV_ICONS = {
@@ -114,6 +115,7 @@ const NAV_ICONS = {
   'paper-maker': '<rect x="3.5" y="2" width="9" height="12" rx="1.5"></rect><path d="M6 6h4M6 9h2.5"></path>',
   analytics: '<path d="M3.5 13V9M8 13V5.5M12.5 13V3"></path>',
   materials: '<path d="M2.5 12.5v-8a1 1 0 0 1 1-1h3l1.5 2h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"></path>',
+  'note-maker': '<path d="M4.5 2h5.5l3 3v8.5a1 1 0 0 1-1 1h-7.5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"></path><path d="M6 6.5h4M6 9h4M6 11.5h2.5"></path>',
   credits: '<circle cx="8" cy="8" r="5.5"></circle><circle cx="8" cy="8" r="2"></circle>',
   settings: '<path d="M3 5h10M3 11h10"></path><circle cx="6" cy="5" r="1.7"></circle><circle cx="10.5" cy="11" r="1.7"></circle>',
   logout: '<path d="M6 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1H6M10.5 11l3-3-3-3M13.3 8H6"></path>'

@@ -59,7 +59,10 @@ export const COSTS = {
   'material_lesson plan': 3,
   practice_worksheet: 2,
   evaluate_sheet: 1.5,
-  extract_paper: 2                // reading a teacher's own uploaded question paper
+  extract_paper: 2,               // reading a teacher's own uploaded question paper
+  note_maker: 3,                  // Note Maker: generate notes for one chapter, class-aware
+  note_maker_chapter: 0.75,       // + per additional chapter selected
+  note_maker_reference: 1.5       // reading a teacher-uploaded reference notes file
 };
 
 export function paperCost(totalMarks) {
@@ -73,6 +76,7 @@ export function costOf(action, opts = {}) {
   if (action === 'paper') return paperCost(opts.totalMarks);
   if (action === 'material') return COSTS[`material_${String(opts.type || '').toLowerCase()}`] ?? 2;
   if (action === 'evaluate') return COSTS.evaluate_sheet * (opts.sheets || 1);
+  if (action === 'note_maker') return round(COSTS.note_maker + Math.max(0, (opts.chapters || 1) - 1) * COSTS.note_maker_chapter);
   return COSTS[action] ?? 0;
 }
 

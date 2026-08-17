@@ -357,6 +357,62 @@ Return JSON: {"title":"...","body":"..."}
   };
 }
 
+/**
+ * Note Maker — full revision notes for one or more chapters, optionally
+ * personalised with the class's (or one student's) weak-concept data and/or
+ * a teacher-supplied reference file's content. Unlike generateMaterial's
+ * quick NOTES type, this always covers a real chapter list and can lean on
+ * analytics, so it gets its own prompt rather than reusing MATERIAL_BRIEF.
+ * @param {{board:string, grade:string, subject:string, chapters:string[], medium:string, weakConcepts?:string[], referenceText?:string}} opts
+ */
+export async function generateSmartNotes({ board, grade, subject, chapters, medium, weakConcepts = [], referenceText = '' }) {
+  const prompt = `Write complete revision notes for these chapters, the way an experienced ${board} class ${grade} ${subject} teacher would hand out to students.
+
+Chapters to cover: ${chapters.join('; ')}
+Medium: ${medium}
+For each chapter, include: definitions, key formulae/facts, 3-5 worked points or examples, and a "commonly confused" callout.
+${weakConcepts.length ? `\nThis class (or student) is specifically weak on: ${weakConcepts.join('; ')}. Give these noticeably more depth, extra worked examples and simpler step-by-step explanations than the rest — that's the point of these notes.` : ''}
+${referenceText ? `\nThe teacher has also supplied their own reference notes below — match their terminology, emphasis and structure where it fits, and fold in anything useful from it. Do not just copy it verbatim.\n\n"""\n${referenceText.slice(0, 6000)}\n"""` : ''}
+
+Return JSON: {"title":"...","body":"..."}
+"body" is plain text with line breaks and a clear "Chapter: ..." heading per chapter, ready to print. No markdown headers.`;
+
+  const data = await askJson(prompt, { temperature: 0.7 });
+  if (data?.body) {
+    return {
+      title: String(data.title || chapters.join(', ')).trim(),
+      body: String(data.body).trim(),
+      generatedBy: 'gemini'
+    };
+  }
+  return {
+    title: chapters.join(', '),
+    body:
+      `[Generated offline — set GEMINI_API_KEY for AI-written notes.]\n\n` +
+      `Notes for ${board} Class ${grade} ${subject}\nChapters: ${chapters.join('; ')}\n\n` +
+      `Add your content here.`,
+    generatedBy: 'offline'
+  };
+}
+
+/**
+ * Reads a teacher's own reference notes (photo/PDF/typed scan) and transcribes
+ * their actual content as plain text, so it can be folded into generateSmartNotes
+ * as style/content guidance. Returns null if nothing readable came back.
+ */
+export async function extractNotesFromFile({ fileBuffer, mimeType }) {
+  const prompt = `This file is a teacher's own handwritten or typed notes for a school lesson.
+
+Transcribe the actual content faithfully — headings, definitions, formulae, examples, everything legible. Do not summarize or shorten it; this transcription will be used as source material for generating polished student notes later.
+
+Return JSON: {"text":"the transcribed content"}
+Use "" if the file has no legible notes content at all.`;
+
+  const data = await askJsonWithFile(prompt, { mimeType, data: fileBuffer.toString('base64'), temperature: 0.1 });
+  const text = String(data?.text || '').trim();
+  return text || null;
+}
+
 /* ------------------------------------------------------------ evaluation */
 
 /**

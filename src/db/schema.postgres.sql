@@ -227,19 +227,31 @@ create policy "weak_concepts: owner all" on weak_concepts for all using (user_id
 
 -- -----------------------------------------------------------------materials
 create table if not exists materials (
-  id           uuid primary key default gen_random_uuid(),
-  user_id      uuid not null references auth.users(id) on delete cascade,
-  class_id     uuid references classes(id) on delete set null,
-  type         text not null,                        -- NOTES | WORKSHEET | QUIZ | LESSON PLAN
-  title        text not null,
-  chapter      text default '',
-  concept      text,
-  body         text not null default '',
-  generated_by text not null default 'offline',
-  created_at   timestamptz not null default now()
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid not null references auth.users(id) on delete cascade,
+  class_id       uuid references classes(id) on delete set null,
+  student_id     uuid references students(id) on delete set null,
+  type           text not null,                        -- NOTES | WORKSHEET | QUIZ | LESSON PLAN
+  title          text not null,
+  chapter        text default '',
+  concept        text,
+  chapters       jsonb not null default '[]',           -- Note Maker: full chapter list (single-chapter Materials leave this empty)
+  body           text not null default '',
+  reference_text text,                                  -- Note Maker: extracted text from a teacher-uploaded reference file, if any
+  used_analytics boolean not null default false,         -- Note Maker: whether class/student weak-concept data informed this note
+  generated_by   text not null default 'offline',
+  created_at     timestamptz not null default now()
 );
 alter table materials enable row level security;
 create policy "materials: owner all" on materials for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Note Maker additions — run these ALTERs manually in the Supabase SQL editor
+-- against the existing production `materials` table (the CREATE above only
+-- applies to a fresh install, since it's `if not exists`).
+alter table materials add column if not exists student_id uuid references students(id) on delete set null;
+alter table materials add column if not exists chapters jsonb not null default '[]';
+alter table materials add column if not exists reference_text text;
+alter table materials add column if not exists used_analytics boolean not null default false;
 
 -- ------------------------------------------------------------- credit_ledger
 create table if not exists credit_ledger (

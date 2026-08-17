@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Note Maker — Staffroom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .nm-drop { border: 1.5px dashed #DCD5C3; border-radius: 10px; padding: 22px; text-align: center; background: #FBF9F2; cursor: pointer; transition: border-color .15s, background .15s; }
+  .nm-drop.drag { border-color: #0F4C4F; background: #E6EFEE; }
+  .nm-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #E4DECD; }
+  .nm-row:last-child { border-bottom: none; }
+  .nm-row:hover { background: #FBF9F2; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="shared.js"></script>
+<script>
+(async () => {
+  const { user, main } = await mountShell('note-maker', 'Note Maker');
+  main.classList.add('wide');
+
+  if (user.plan === 'Free') {
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Note Maker</h1>
+        <p class="sr-subtitle">AI-written revision notes, personalised to what your class is struggling with.</p>
+      </div>
+      <div class="sr-card" style="padding:32px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">PRO PLAN FEATURE</span>
+        <h2 style="margin:0;font-family:'Source Serif 4',serif;font-size:20px;font-weight:600;color:#0F4C4F;">Upgrade to Pro to use Note Maker</h2>
+        <p style="margin:0;max-width:440px;font-size:13.5px;color:#6E675C;line-height:1.55;">Chapter-wise notes generation, weak-concept personalisation and your own reference notes are part of the Pro and Max plans.</p>
+        <a href="credits.html" class="sr-btn-primary" style="text-decoration:none;margin-top:6px;">View plans</a>
+      </div>`;
+    return;
+  }
+
+  const state = {
+    classes: [], classId: null,
+    chapters: [], selectedChapters: {}, chaptersLoading: false, chaptersGeneratedBy: null,
+    students: [], studentId: '',
+    useAnalytics: true,
+    refDragOver: false, refFile: null, refText: '', refLoading: false, refCost: 0,
+    generating: false,
+    recent: [], recentLoading: false,
+    viewing: null
+  };
+
+  async function boot() {
+    const { classes } = await api('/classes');
+    state.classes = classes;
+    if (!state.classId && classes.length) state.classId = classes[0].id;
+    if (state.classId) { await Promise.all([loadChapters(), loadStudents(), loadRecent()]); }
+    render();
+  }
+
+  async function loadChapters() {
+    if (!state.classId) { state.chapters = []; return; }
+    state.chaptersLoading = true;
+    try {
+      const { chapters, generatedBy } = await api(`/classes/${state.classId}/chapters`);
+      state.chapters = chapters;
+      state.chaptersGeneratedBy = generatedBy;
+      state.selectedChapters = {};
+      if (chapters.length) state.selectedChapters[chapters[0].name] = true;
+    } catch (e) {
+      state.chapters = [];
+      errorToast(e);
+    } finally {
+      state.chaptersLoading = false;
+    }
+  }
+
+  async function loadStudents() {
+    if (!state.classId) { state.students = []; return; }
+    const { students } = await api(`/classes/${state.classId}/students`);
+    state.students = students;
+    if (!students.some((s) => s.id === state.studentId)) state.studentId = '';
+  }
+
+  async function loadRecent() {
+    state.recentLoading = true;
+    try {
+      const { materials } = await api(`/note-maker${state.classId ? '?classId=' + state.classId : ''}`);
+      state.recent = materials;
+    } finally {
+      state.recentLoading = false;
+    }
+  }
+
+  function selClass() { return state.classes.find((c) => c.id === state.classId); }
+  function selectedChapterNames() { return Object.keys(state.selectedChapters).filter((k) => state.selectedChapters[k]); }
+  function estCost() {
+    const n = selectedChapterNames().length || 1;
+    return (3 + Math.max(0, n - 1) * 0.75).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+  }
+
+  function render() {
+    const cls = selClass();
+    const chNames = selectedChapterNames();
+
+    main.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <h1 class="sr-title">Note Maker</h1>
+        <p class="sr-subtitle">Pick a class and chapters — AI writes the notes, weighted toward what that class (or student) is weak on.</p>
+      </div>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:16px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">1. CLASS &amp; CHAPTERS</span>
+        <div class="sr-field">
+          <span class="label">Class</span>
+          <select id="nmClass">
+            ${state.classes.length ? state.classes.map((c) => `<option value="${c.id}" ${c.id === state.classId ? 'selected' : ''}>${esc(c.key)} · ${esc(c.subject)}</option>`).join('') : '<option>No classes yet</option>'}
+          </select>
+        </div>
+
+        ${state.chaptersLoading ? `
+        <div style="display:flex;align-items:center;gap:8px;"><span class="sr-spinner"></span><span style="font-size:13px;color:#8A8272;">Looking up the syllabus…</span></div>` : `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            ${state.chapters.map((c) => `
+              <button data-ch="${esc(c.name)}" style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:99px;font-size:13px;font-family:inherit;cursor:pointer;${state.selectedChapters[c.name] ? 'background:#0F4C4F;border:1px solid #0F4C4F;color:#F5F2E9;' : 'background:#FBF9F2;border:1px solid #DCD5C3;color:#4A4437;'}">
+                ${esc(c.name)}
+              </button>`).join('') || '<span style="font-size:13px;color:#8A8272;">No chapters found for this class.</span>'}
+          </div>
+          <span style="font-size:12.5px;color:#8A8272;">${chNames.length ? `${chNames.length} chapter${chNames.length > 1 ? 's' : ''} selected` : 'Select at least one chapter to continue.'}${state.chaptersGeneratedBy === 'gemini' ? ' · researched by AI' : ''}</span>
+        </div>`}
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">2. PERSONALIZE</span>
+        <label style="display:flex;align-items:center;gap:9px;font-size:13.5px;color:#2B2B2B;cursor:pointer;">
+          <input type="checkbox" id="nmUseAnalytics" ${state.useAnalytics ? 'checked' : ''}>
+          Use weak-concept analytics to give extra depth where it's needed
+        </label>
+        <div class="sr-field">
+          <span class="label">Personalise for one student (optional)</span>
+          <select id="nmStudent">
+            <option value="">Whole class</option>
+            ${state.students.map((s) => `<option value="${s.id}" ${s.id === state.studentId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+          </select>
+        </div>
+      </section>
+
+      <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">3. YOUR OWN REFERENCE NOTES (OPTIONAL)</span>
+        ${state.refText ? `
+        <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;background:#F5F2E9;border-radius:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span style="font-size:13px;font-weight:600;color:#2B2B2B;">${esc(state.refFile?.name || 'Reference notes')} — read successfully</span>
+            <button id="nmRefRemove" style="background:none;border:none;color:#A2593F;cursor:pointer;font-size:13px;">Remove</button>
+          </div>
+          <span style="font-size:12px;color:#6E675C;">${esc(state.refText.slice(0, 220))}${state.refText.length > 220 ? '…' : ''}</span>
+        </div>` : `
+        <div id="nmRefDrop" class="nm-drop${state.refDragOver ? ' drag' : ''}">
+          <input type="file" id="nmRefFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" style="display:none;">
+          ${state.refLoading
+            ? `<span style="font-size:13.5px;color:#2B2B2B;font-weight:600;">Reading your notes…</span>`
+            : `<span style="font-size:13.5px;color:#2B2B2B;font-weight:600;">Drop your notes here, or click to choose</span><br><span style="font-size:12px;color:#8A8272;">JPEG, PNG, WEBP, HEIC or PDF · ≈${costOfRef()} credits to read</span>`}
+        </div>`}
+      </section>
+
+      <section style="display:flex;flex-direction:column;gap:10px;">
+        <button id="nmGenerate" class="sr-btn-primary" style="align-self:flex-start;" ${state.generating || !chNames.length || !state.classId ? 'disabled' : ''}>
+          ${state.generating ? 'Generating…' : `Generate notes (≈${estCost()} credits)`}
+        </button>
+      </section>
+
+      <section style="display:flex;flex-direction:column;gap:10px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">RECENT NOTES${cls ? ' — ' + esc(cls.key) : ''}</span>
+        <div class="sr-card" style="overflow:hidden;">
+          ${state.recentLoading ? `<div style="padding:16px;font-size:13px;color:#8A8272;">Loading…</div>` :
+            state.recent.length ? state.recent.map((m) => `
+            <div class="nm-row" data-open-note="${m.id}">
+              <div style="flex:1;display:flex;flex-direction:column;gap:1px;">
+                <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(m.title)}</span>
+                <span style="font-size:12px;color:#8A8272;">${esc((m.chapters || []).join(', ') || m.chapter || '')}${m.usedAnalytics ? ' · personalised' : ''}</span>
+              </div>
+              <span style="font-size:11.5px;color:#8A8272;">${relTime(m.createdAt)}</span>
+              <span style="font-size:12px;color:#8A8272;">→</span>
+            </div>`).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No notes generated yet.</div>`}
+        </div>
+      </section>
+    `;
+    wire();
+  }
+
+  function costOfRef() { return 1.5; }
+
+  function wire() {
+    const classSel = document.getElementById('nmClass');
+    if (classSel) classSel.onchange = async (e) => {
+      state.classId = e.target.value;
+      state.refFile = null; state.refText = '';
+      await Promise.all([loadChapters(), loadStudents(), loadRecent()]);
+      render();
+    };
+
+    main.querySelectorAll('[data-ch]').forEach((el) => el.onclick = () => {
+      state.selectedChapters[el.dataset.ch] = !state.selectedChapters[el.dataset.ch];
+      render();
+    });
+
+    const useAnalytics = document.getElementById('nmUseAnalytics');
+    if (useAnalytics) useAnalytics.onchange = (e) => { state.useAnalytics = e.target.checked; };
+    const studentSel = document.getElementById('nmStudent');
+    if (studentSel) studentSel.onchange = (e) => { state.studentId = e.target.value; };
+
+    const refDrop = document.getElementById('nmRefDrop');
+    if (refDrop) {
+      const refInput = document.getElementById('nmRefFile');
+      refDrop.onclick = () => refInput.click();
+      refInput.onchange = (e) => { const f = e.target.files[0]; if (f) uploadReference(f); };
+      refDrop.addEventListener('dragover', (e) => { e.preventDefault(); refDrop.classList.add('drag'); });
+      refDrop.addEventListener('dragleave', () => refDrop.classList.remove('drag'));
+      refDrop.addEventListener('drop', (e) => { e.preventDefault(); refDrop.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) uploadReference(f); });
+    }
+    const refRemove = document.getElementById('nmRefRemove');
+    if (refRemove) refRemove.onclick = () => { state.refFile = null; state.refText = ''; render(); };
+
+    const genBtn = document.getElementById('nmGenerate');
+    if (genBtn) genBtn.onclick = generate;
+
+    main.querySelectorAll('[data-open-note]').forEach((el) => el.onclick = () => viewNote(el.dataset.openNote));
+  }
+
+  async function uploadReference(file) {
+    state.refFile = file; state.refLoading = true; render();
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await apiUpload('/note-maker/reference', form);
+      if (res.refunded) {
+        toast(res.error);
+        state.refFile = null;
+      } else {
+        refreshCreditChips(res.balance);
+        state.refText = res.referenceText;
+        toast('Reference notes read');
+      }
+    } catch (e) {
+      errorToast(e);
+      state.refFile = null;
+    }
+    state.refLoading = false;
+    render();
+  }
+
+  async function generate() {
+    const chapters = selectedChapterNames();
+    if (!chapters.length || !state.classId) return;
+    state.generating = true; render();
+    try {
+      const res = await api('/note-maker/generate', {
+        method: 'POST',
+        body: {
+          classId: state.classId, chapters,
+          studentId: state.studentId || undefined,
+          useAnalytics: state.useAnalytics,
+          referenceText: state.refText || undefined
+        }
+      });
+      refreshCreditChips(res.balance);
+      toast(`Notes generated${res.generatedBy === 'offline' ? ' (offline mode — set GEMINI_API_KEY for AI content)' : ''}`);
+      await loadRecent();
+      viewNote(res.material.id, res.material);
+    } catch (e) {
+      errorToast(e);
+    }
+    state.generating = false;
+    render();
+  }
+
+  function viewNote(id, materialOverride) {
+    const m = materialOverride || state.recent.find((x) => x.id === id);
+    if (!m) return;
+    openModal(`
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">NOTES${m.usedAnalytics ? ' · PERSONALISED' : ''}</span>
+        <h3 style="margin:0;font-family:'Source Serif 4',serif;font-size:19px;font-weight:600;color:#0F4C4F;">${esc(m.title)}</h3>
+      </div>
+      <div style="white-space:pre-wrap;font-size:13.5px;line-height:1.6;color:#2B2B2B;max-height:50vh;overflow-y:auto;border:1px solid #E4DECD;border-radius:8px;padding:14px;background:#F8F4E9;">${esc(m.body)}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="nmPrint" class="sr-btn-secondary">Print</button>
+        <button id="closeView" class="sr-btn-primary">Close</button>
+      </div>
+    `);
+    document.getElementById('closeView').onclick = closeModal;
+    document.getElementById('nmPrint').onclick = () => {
+      const w = window.open('', '_blank');
+      w.document.write(`<pre style="font-family:inherit;white-space:pre-wrap;padding:24px;">${esc(m.title)}\n\n${esc(m.body)}</pre>`);
+      w.document.close();
+      w.print();
+    };
+  }
+
+  function openModal(inner) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sr-modal-backdrop';
+    backdrop.id = 'srModal';
+    backdrop.innerHTML = `<div class="sr-modal">${inner}</div>`;
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+    document.body.appendChild(backdrop);
+  }
+  function closeModal() { document.getElementById('srModal')?.remove(); }
+
+  await boot();
+})();
+</script>
+</body>
+</html>

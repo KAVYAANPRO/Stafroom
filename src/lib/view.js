@@ -81,11 +81,15 @@ export function viewMaterial(m) {
   return {
     id: m.id,
     classId: m.class_id,
+    studentId: m.student_id,
     type: m.type,
     title: m.title,
     chapter: m.chapter,
     concept: m.concept,
+    chapters: json(m.chapters, []),
     body: m.body,
+    hasReference: Boolean(m.reference_text),
+    usedAnalytics: Boolean(m.used_analytics),
     generatedBy: m.generated_by,
     createdAt: m.created_at
   };

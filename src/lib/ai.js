@@ -30,28 +30,39 @@ Rules you never break:
 - Use plain text with unicode symbols (×, ⁸, ∠, ½). No markdown, no LaTeX.
 Return only JSON matching the requested shape.`;
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function askJson(prompt, { temperature = 0.7 } = {}) {
   const ai = genai();
   if (!ai) return null;
-  try {
-    const res = await ai.models.generateContent({
-      model: MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM,
-        temperature,
-        responseMimeType: 'application/json'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await ai.models.generateContent({
+        model: MODEL,
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM,
+          temperature,
+          responseMimeType: 'application/json'
+        }
+      });
+      return parseJson(res.text);
+    } catch (err) {
+      // Gemini itself failing (rate limit, transient 503, network blip) is not
+      // the same as "no API key" — but every caller already has an offline
+      // fallback path for a null return, so routing it there is what keeps a
+      // transient outage from becoming an uncaught 500 with credits already
+      // spent and nothing to show for it. One retry first, since a lot of
+      // these are genuinely transient (a "high demand" 503 that clears in a
+      // second or two), and immediately giving up wastes a real attempt.
+      if (attempt === 0) {
+        console.error('Gemini request failed, retrying once:', err?.message || err);
+        await sleep(800);
+        continue;
       }
-    });
-    return parseJson(res.text);
-  } catch (err) {
-    // Gemini itself failing (rate limit, transient 503, network blip) is not
-    // the same as "no API key" — but every caller already has an offline
-    // fallback path for a null return, so routing it there is what keeps a
-    // transient outage from becoming an uncaught 500 with credits already
-    // spent and nothing to show for it.
-    console.error('Gemini request failed, falling back:', err?.message || err);
-    return null;
+      console.error('Gemini request failed after retry, falling back:', err?.message || err);
+      return null;
+    }
   }
 }
 
@@ -63,23 +74,30 @@ async function askJson(prompt, { temperature = 0.7 } = {}) {
 async function askJsonWithFile(prompt, { mimeType, data, temperature = 0.2 } = {}) {
   const ai = genai();
   if (!ai) return null;
-  try {
-  const res = await ai.models.generateContent({
-    model: MODEL,
-    contents: [{
-      role: 'user',
-      parts: [{ text: prompt }, { inlineData: { mimeType, data } }]
-    }],
-    config: {
-      systemInstruction: SYSTEM,
-      temperature,
-      responseMimeType: 'application/json'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await ai.models.generateContent({
+        model: MODEL,
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }, { inlineData: { mimeType, data } }]
+        }],
+        config: {
+          systemInstruction: SYSTEM,
+          temperature,
+          responseMimeType: 'application/json'
+        }
+      });
+      return parseJson(res.text);
+    } catch (err) {
+      if (attempt === 0) {
+        console.error('Gemini file request failed, retrying once:', err?.message || err);
+        await sleep(800);
+        continue;
+      }
+      console.error('Gemini file request failed after retry, falling back:', err?.message || err);
+      return null;
     }
-  });
-  return parseJson(res.text);
-  } catch (err) {
-    console.error('Gemini file request failed, falling back:', err?.message || err);
-    return null;
   }
 }
 
@@ -366,31 +384,41 @@ Return JSON: {"title":"...","body":"..."}
  * @param {{board:string, grade:string, subject:string, chapters:string[], medium:string, weakConcepts?:string[], referenceText?:string}} opts
  */
 export async function generateSmartNotes({ board, grade, subject, chapters, medium, weakConcepts = [], referenceText = '' }) {
-  const prompt = `Write complete revision notes for these chapters, the way an experienced ${board} class ${grade} ${subject} teacher would hand out to students.
+  // One Gemini call per chapter, run in parallel, rather than one giant
+  // multi-chapter prompt — a 5-chapter "notes with worked examples" request
+  // routinely took 40-70s end to end in testing, which is well into
+  // timeout territory (Render's proxy, the SDK's own client timeout) even
+  // when Gemini itself eventually succeeds. Splitting keeps each request
+  // small and fast, and means one chapter failing doesn't lose the rest.
+  const results = await Promise.all(
+    chapters.map((chapter) => generateChapterNotes({ board, grade, subject, chapter, medium, weakConcepts, referenceText }))
+  );
+  return {
+    title: chapters.length === 1 ? results[0].title : chapters.join(', '),
+    body: results.map((r) => r.body).join('\n\n'),
+    generatedBy: results.some((r) => r.generatedBy === 'gemini') ? 'gemini' : 'offline'
+  };
+}
 
-Chapters to cover: ${chapters.join('; ')}
+async function generateChapterNotes({ board, grade, subject, chapter, medium, weakConcepts, referenceText }) {
+  const prompt = `Write complete revision notes for this chapter, the way an experienced ${board} class ${grade} ${subject} teacher would hand out to students.
+
+Chapter: ${chapter}
 Medium: ${medium}
-For each chapter, include: definitions, key formulae/facts, 3-5 worked points or examples, and a "commonly confused" callout.
-${weakConcepts.length ? `\nThis class (or student) is specifically weak on: ${weakConcepts.join('; ')}. Give these noticeably more depth, extra worked examples and simpler step-by-step explanations than the rest — that's the point of these notes.` : ''}
+Include: definitions, key formulae/facts, 3-5 worked points or examples, and a "commonly confused" callout.
+${weakConcepts.length ? `\nThis class (or student) is specifically weak on: ${weakConcepts.join('; ')}. If any of that applies to this chapter, give it noticeably more depth, extra worked examples and simpler step-by-step explanations than the rest — that's the point of these notes.` : ''}
 ${referenceText ? `\nThe teacher has also supplied their own reference notes below — match their terminology, emphasis and structure where it fits, and fold in anything useful from it. Do not just copy it verbatim.\n\n"""\n${referenceText.slice(0, 6000)}\n"""` : ''}
 
 Return JSON: {"title":"...","body":"..."}
-"body" is plain text with line breaks and a clear "Chapter: ..." heading per chapter, ready to print. No markdown headers.`;
+"body" is plain text with line breaks, ready to print. No markdown headers.`;
 
   const data = await askJson(prompt, { temperature: 0.7 });
   if (data?.body) {
-    return {
-      title: String(data.title || chapters.join(', ')).trim(),
-      body: String(data.body).trim(),
-      generatedBy: 'gemini'
-    };
+    return { title: String(data.title || chapter).trim(), body: `Chapter: ${chapter}\n\n${String(data.body).trim()}`, generatedBy: 'gemini' };
   }
   return {
-    title: chapters.join(', '),
-    body:
-      `[AI generation is temporarily unavailable — this is a placeholder.]\n\n` +
-      `Notes for ${board} Class ${grade} ${subject}\nChapters: ${chapters.join('; ')}\n\n` +
-      `Add your content here.`,
+    title: chapter,
+    body: `Chapter: ${chapter}\n\n[AI generation is temporarily unavailable for this chapter — try regenerating.]`,
     generatedBy: 'offline'
   };
 }

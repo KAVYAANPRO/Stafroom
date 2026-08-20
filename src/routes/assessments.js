@@ -7,6 +7,7 @@ import { viewAssessment, viewAssessmentQuestion } from '../lib/view.js';
 import { blueprintFor, sectionHeadings, defaultInstructions, paperHeader, romanGrade, SUPPORTED_MARKS } from '../lib/blueprint.js';
 import { generatePaper, regenerateQuestion } from '../lib/ai.js';
 import { spend, grant, paperCost, costOf } from '../lib/credits.js';
+import { renderAssessmentPdf } from '../lib/pdf.js';
 
 const router = Router();
 
@@ -44,9 +45,8 @@ router.get('/:id', wrap(async (req, res) => {
   res.json({ assessment: viewAssessment(a, questions) });
 }));
 
-/** Renders the print-ready paper: header text, section groupings, answer key visibility. */
-router.get('/:id/print', wrap(async (req, res) => {
-  const a = await loadAssessment(req);
+/** Shapes one assessment into the header/sections/instructions a print or PDF view needs. */
+async function buildPrintData(req, a) {
   const cls = a.class_id ? (await req.supabase.from('classes').select('*').eq('id', a.class_id).maybeSingle()).data : null;
   const bp = blueprintFor(a.total_marks) || { totalMarks: a.total_marks, sections: [] };
   const header = paperHeader({
@@ -64,7 +64,27 @@ router.get('/:id/print', wrap(async (req, res) => {
     title: h.title, note: h.note,
     questions: questions.filter((q) => q.section === h.key).map(viewAssessmentQuestion)
   }));
-  res.json({ header, sections, instructions: a.instructions || [] });
+  return { header, sections, instructions: a.instructions || [] };
+}
+
+/** Renders the print-ready paper: header text, section groupings, answer key visibility. */
+router.get('/:id/print', wrap(async (req, res) => {
+  const a = await loadAssessment(req);
+  res.json(await buildPrintData(req, a));
+}));
+
+/**
+ * Real PDF export — pdfkit, no browser involved, so no Chrome print
+ * header/footer and no risk to the app from a headless-browser render.
+ */
+router.get('/:id/pdf', wrap(async (req, res) => {
+  const a = await loadAssessment(req);
+  const { header, sections, instructions } = await buildPrintData(req, a);
+  const showKey = req.query.showKey === '1';
+  const buffer = await renderAssessmentPdf({ header, sections, instructions, medium: a.medium, showKey });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${a.title.replace(/[^\w\- ]+/g, '').trim() || 'question-paper'}.pdf"`);
+  res.send(buffer);
 }));
 
 async function createDraft(req, cls, blueprint, opts, generated) {

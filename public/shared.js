@@ -47,6 +47,33 @@ async function apiUpload(path, formData) {
   return data;
 }
 
+/** Fetches a binary file (e.g. a server-rendered PDF) with the auth header attached,
+ * and triggers a normal browser download for it — no <a href> works here since
+ * the API needs a Bearer token, not a cookie. */
+async function apiDownload(path, filename) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(API + path, { headers });
+  if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    const err = new Error((data && data.error) || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
 /** Redirects to the login page if the visitor isn't signed in; returns the user otherwise. */
 async function requireAuth() {
   try {

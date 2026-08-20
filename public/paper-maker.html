@@ -654,7 +654,19 @@
     const btnPrint = document.getElementById('btnPrint');
     if (btnPrint) btnPrint.onclick = () => window.print();
     const btnExport = document.getElementById('btnExport');
-    if (btnExport) btnExport.onclick = () => { toast('Opening the print dialog — choose "Save as PDF"'); setTimeout(() => window.print(), 350); };
+    if (btnExport) btnExport.onclick = () => exportPdf();
+  }
+
+  async function exportPdf() {
+    const btn = document.getElementById('btnExport');
+    if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+    try {
+      const filename = (st.assessment.title || 'question-paper').replace(/[^\w\- ]+/g, '').trim() + '.pdf';
+      await apiDownload(`/assessments/${st.assessment.id}/pdf${st.showKey ? '?showKey=1' : ''}`, filename);
+    } catch (e) {
+      errorToast(e);
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Export PDF'; }
   }
 
   function refreshQuestion(qid) {

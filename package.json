@@ -15,14 +15,17 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
+    "@expo-google-fonts/noto-sans-devanagari": "^0.4.1",
     "@google/genai": "^1.5.0",
     "@supabase/supabase-js": "^2.45.4",
     "adm-zip": "^0.6.0",
+    "dejavu-fonts-ttf": "^2.37.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jose": "^5.9.6",
     "multer": "^2.0.1",
     "pdf-lib": "^1.17.1",
+    "pdfkit": "^0.19.1",
     "razorpay": "^2.9.5"
   }
 }

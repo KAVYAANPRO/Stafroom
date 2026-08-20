@@ -492,25 +492,36 @@ The items array must have exactly ${questions.length} entries, one per question 
 
   const data = await askJsonWithFile(prompt, { mimeType, data: fileBuffer.toString('base64'), temperature: 0.15 });
   const marked = Array.isArray(data?.items) ? data.items : null;
+  if (!marked || !marked.length) return null; // nothing usable came back at all — caller refunds
 
-  if (marked && marked.length === questions.length) {
-    return {
-      items: questions.map((q, i) => {
-        const m = marked[i] || {};
-        const awarded = clamp(Number(m.awarded) || 0, 0, q.marks);
+  // Match by the "position" the model reported rather than requiring the
+  // response array to be exactly as long as the question list — a real
+  // photographed sheet routinely gets one question's numbering missed or
+  // ambiguous, and that used to void the entire evaluation instead of just
+  // flagging that one question for manual review.
+  const byPosition = new Map(marked.map((m) => [Number(m.position), m]));
+  return {
+    items: questions.map((q) => {
+      const m = byPosition.get(q.position);
+      if (!m) {
         return {
           aqId: q.aqId, topic: q.topic, max: q.marks,
-          awarded,
-          confidence: clamp(Number(m.confidence ?? 0.5), 0, 1),
-          comment: String(m.comment || '').slice(0, 300),
-          transcribed: String(m.transcribed || '').slice(0, 500)
+          awarded: 0, confidence: 0,
+          comment: 'Not found on the sheet — mark manually.',
+          transcribed: ''
         };
-      }),
-      generatedBy: 'gemini'
-    };
-  }
-
-  return null; // caller decides how to handle "couldn't read this file at all"
+      }
+      const awarded = clamp(Number(m.awarded) || 0, 0, q.marks);
+      return {
+        aqId: q.aqId, topic: q.topic, max: q.marks,
+        awarded,
+        confidence: clamp(Number(m.confidence ?? 0.5), 0, 1),
+        comment: String(m.comment || '').slice(0, 300),
+        transcribed: String(m.transcribed || '').slice(0, 500)
+      };
+    }),
+    generatedBy: 'gemini'
+  };
 }
 
 /**

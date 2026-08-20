@@ -8,6 +8,9 @@
 <link rel="stylesheet" href="styles.css">
 <style>
   @keyframes pulseDot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.75); } }
+  .ev-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #E4DECD; }
+  .ev-row:last-child { border-bottom: none; }
+  .ev-row:hover { background: #FBF9F2; }
 </style>
 </head>
 <body>
@@ -19,15 +22,20 @@
   main.classList.add('wide');
   main.style.maxWidth = '1120px';
 
-  const qsClassId = new URLSearchParams(location.search).get('classId');
+  const qs = new URLSearchParams(location.search);
+  const qsClassId = qs.get('classId');
+  const qsAssessmentId = qs.get('assessment');
+  const qsNew = qs.get('new');
 
   const st = {
-    stage: 'setup',
+    stage: 'list',
     classes: [], selectedClassId: qsClassId || null,
     chapters: [], selectedChapters: {}, chaptersLoading: false, chaptersGeneratedBy: null,
     selectedMarks: '25', blueprintOptions: [],
     advOpen: false, medium: user.medium || 'English', difficulty: user.difficulty || 'Balanced',
     instrDraft: '', customInstructions: [],
+    // list state
+    listLoading: false, drafts: [], saved: [], listFilterClassId: '',
     // review state
     assessment: null, generatedBy: null, cost: null, balance: null,
     hoveredId: null, regenOpenId: null, swapOpenId: null, editingId: null, editDraft: '',
@@ -39,8 +47,123 @@
     st.classes = classes;
     st.blueprintOptions = marksOptions;
     if (!st.selectedClassId && classes.length) st.selectedClassId = classes[0].id;
-    await loadChapters();
+
+    if (qsAssessmentId) {
+      await openAssessment(qsAssessmentId);
+      return;
+    }
+    if (qsClassId || qsNew) {
+      st.stage = 'setup';
+      await loadChapters();
+      render();
+      return;
+    }
+    await loadList();
     render();
+  }
+
+  /* ------------------------------------------------------------------ list */
+
+  async function loadList() {
+    st.listLoading = true;
+    try {
+      const { assessments } = await api('/assessments' + (st.listFilterClassId ? `?classId=${st.listFilterClassId}` : ''));
+      st.drafts = assessments.filter((a) => a.status === 'Draft');
+      st.saved = assessments.filter((a) => a.status !== 'Draft');
+    } catch (e) {
+      errorToast(e);
+      st.drafts = []; st.saved = [];
+    } finally {
+      st.listLoading = false;
+    }
+  }
+
+  function classLabel(a) {
+    const c = st.classes.find((x) => x.id === a.classId);
+    return c ? `${c.key} · ${c.subject}` : a.subject || '';
+  }
+
+  function renderList() {
+    main.innerHTML = `
+      <div style="width:100%;display:flex;flex-direction:column;gap:20px;animation:rise .3s ease;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <h1 class="sr-title">Assessments</h1>
+            <p class="sr-subtitle">Every paper you've generated — drafts you haven't saved yet, and the ones you've finalized.</p>
+          </div>
+          <button id="btnNewPaper" class="sr-btn-primary" style="display:flex;align-items:center;gap:7px;flex-shrink:0;"><span style="font-size:15px;">+</span><span>Generate new paper</span></button>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button data-list-cls="" class="sr-chip${st.listFilterClassId === '' ? ' active' : ''}">All classes</button>
+          ${st.classes.map((c) => `<button data-list-cls="${c.id}" class="sr-chip${st.listFilterClassId === c.id ? ' active' : ''}">${esc(c.key)}</button>`).join('')}
+        </div>
+
+        ${st.listLoading ? `<div style="display:flex;align-items:center;gap:10px;padding:20px 0;"><span class="sr-spinner"></span><span style="font-size:13px;color:#8A8272;">Loading…</span></div>` : `
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">DRAFTS (${st.drafts.length})</span>
+          <div class="sr-card" style="overflow:hidden;">
+            ${st.drafts.length ? st.drafts.map(assessmentRow).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No drafts — papers you generate but don't finalize will show up here.</div>`}
+          </div>
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px;">
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">SAVED (${st.saved.length})</span>
+          <div class="sr-card" style="overflow:hidden;">
+            ${st.saved.length ? st.saved.map(assessmentRow).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No finalized papers yet.</div>`}
+          </div>
+        </section>`}
+      </div>
+    `;
+
+    document.getElementById('btnNewPaper').onclick = () => { st.stage = 'setup'; st.selectedChapters = {}; render(); loadChapters(); };
+    main.querySelectorAll('[data-list-cls]').forEach((el) => el.onclick = async () => { st.listFilterClassId = el.dataset.listCls; render(); await loadList(); render(); });
+    main.querySelectorAll('[data-open-assessment]').forEach((el) => el.onclick = () => openAssessment(el.dataset.openAssessment));
+    main.querySelectorAll('[data-delete-assessment]').forEach((el) => el.onclick = (e) => { e.stopPropagation(); deleteAssessment(el.dataset.deleteAssessment); });
+  }
+
+  const STATUS_STYLE = {
+    Draft: ['#F6EDD4', '#8C6A1E'], Finalized: ['#EDF1ED', '#3E5240'],
+    Distributed: ['#E6EFEE', '#0F4C4F'], Evaluated: ['#EDF1ED', '#3E5240']
+  };
+
+  function assessmentRow(a) {
+    const style = STATUS_STYLE[a.status] || STATUS_STYLE.Draft;
+    return `
+    <div class="ev-row" data-open-assessment="${a.id}" style="cursor:pointer;">
+      <div style="flex:1;display:flex;flex-direction:column;gap:1px;min-width:0;">
+        <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">${esc(a.title)}</span>
+        <span style="font-size:12px;color:#8A8272;">${esc(classLabel(a))} · ${a.totalMarks} marks</span>
+      </div>
+      <span style="font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;background:${style[0]};color:${style[1]};flex-shrink:0;">${esc(a.status)}</span>
+      <span style="font-size:12.5px;color:#8A8272;flex-shrink:0;width:90px;text-align:right;">${relTime(a.createdAt)}</span>
+      <button data-delete-assessment="${a.id}" title="Delete" style="background:none;border:none;color:#A2593F;cursor:pointer;font-size:14px;flex-shrink:0;">✕</button>
+      <span style="font-size:12px;color:#8A8272;flex-shrink:0;">→</span>
+    </div>`;
+  }
+
+  async function openAssessment(id) {
+    try {
+      const { assessment } = await api(`/assessments/${id}`);
+      st.assessment = assessment;
+      st.selectedClassId = assessment.classId || st.selectedClassId;
+      st.generatedBy = assessment.generatedBy;
+      st.cost = null; st.balance = null;
+      st.showKey = false; st.saveState = null;
+      st.hoveredId = null; st.regenOpenId = null; st.swapOpenId = null; st.editingId = null;
+      st.stage = 'review';
+      render();
+    } catch (e) { errorToast(e); }
+  }
+
+  async function deleteAssessment(id) {
+    try {
+      await api(`/assessments/${id}`, { method: 'DELETE' });
+      st.drafts = st.drafts.filter((a) => a.id !== id);
+      st.saved = st.saved.filter((a) => a.id !== id);
+      render();
+      toast('Deleted');
+    } catch (e) { errorToast(e); }
   }
 
   async function loadChapters() {
@@ -67,6 +190,7 @@
   function selClass() { return st.classes.find((c) => c.id === st.selectedClassId); }
 
   function render() {
+    if (st.stage === 'list') return renderList();
     if (st.stage === 'setup') return renderSetup();
     if (st.stage === 'generating') return renderGenerating();
     renderReview();
@@ -87,6 +211,7 @@
     main.innerHTML = `
       <div style="width:100%;max-width:740px;margin:0 auto;display:flex;flex-direction:column;gap:18px;animation:rise .3s ease;">
         <div style="display:flex;flex-direction:column;gap:6px;">
+          <a href="#" id="btnBackToListSetup" style="font-size:12.5px;font-weight:600;color:#0F4C4F;text-decoration:none;align-self:flex-start;">← Assessments</a>
           <h1 style="margin:0;font-family:'Source Serif 4',serif;font-size:27px;font-weight:600;letter-spacing:-0.01em;color:#0F4C4F;">New question paper</h1>
           <p style="margin:0;font-size:14px;color:#6E675C;line-height:1.5;">Three choices, one click — Staffroom already knows your board, classes and syllabus.</p>
         </div>
@@ -179,6 +304,7 @@
       </div>
     `;
 
+    document.getElementById('btnBackToListSetup').onclick = async (e) => { e.preventDefault(); await backToList(); };
     document.getElementById('classPicker').querySelectorAll('[data-cls]').forEach((el) => el.onclick = async () => {
       st.selectedClassId = el.dataset.cls;
       st.selectedChapters = {};
@@ -327,8 +453,12 @@
     main.innerHTML = `
       <div style="width:100%;display:flex;flex-direction:column;gap:18px;animation:rise .3s ease;">
         <div style="display:flex;align-items:center;gap:10px;background:#EDF1ED;border:1px solid #D6DFD6;border-radius:10px;padding:12px 16px;" class="sr-hide-print">
-          <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-          <span style="font-size:13.5px;color:#3E5240;"><strong>Paper ready.</strong> ${st.cost} credits used · balance ${Math.round(st.balance).toLocaleString()}</span>
+          <a href="#" id="btnBackToList" style="font-size:12.5px;font-weight:600;color:#0F4C4F;text-decoration:none;flex-shrink:0;">← Assessments</a>
+          <span style="width:1px;align-self:stretch;background:#D6DFD6;"></span>
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          ${st.cost !== null
+            ? `<span style="font-size:13.5px;color:#3E5240;"><strong>Paper ready.</strong> ${st.cost} credits used · balance ${Math.round(st.balance).toLocaleString()}</span>`
+            : `<span style="font-size:13.5px;color:#3E5240;"><strong>${esc(a.status)}.</strong> ${a.status === 'Draft' ? 'Not finalized yet.' : ''}</span>`}
           <span style="flex:1;"></span>
           <a href="question-bank.html" style="font-size:13px;font-weight:600;color:#0F4C4F;">${questions.length} questions saved to Question Bank →</a>
         </div>
@@ -404,13 +534,20 @@
                     <span style="font-size:13px;color:#3E5240;">${st.saveState === 'saved' ? `Saved — ${esc(a.status)}` : 'Kept as draft — find it under Assessments'}</span>
                   </div>
                   <a href="#" id="undoSave" style="font-size:12px;color:#8A8272;">Undo</a>
-                </div>` : `
+                </div>` : a.status === 'Draft' ? `
                 <button id="btnSaveFinal" style="width:100%;background:#0F4C4F;color:#F5F2E9;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Save &amp; finalize${cls ? ' for ' + esc(cls.key) : ''}</button>
                 <div style="display:flex;gap:8px;">
                   <button id="btnExport" class="sr-btn-secondary" style="flex:1;">Export PDF</button>
                   <button id="btnPrint" class="sr-btn-secondary" style="flex:1;">Print</button>
                 </div>
-                <a href="#" id="btnDraft" style="text-align:center;font-size:12.5px;color:#8A8272;">Keep as draft</a>`}
+                ${st.cost !== null ? `<a href="#" id="btnDraft" style="text-align:center;font-size:12.5px;color:#8A8272;">Keep as draft</a>` : `<a href="#" id="btnDeleteDraft" style="text-align:center;font-size:12.5px;color:#A2593F;">Delete this draft</a>`}` : `
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;padding:3px 9px;border-radius:99px;background:#EDF1ED;color:#3E5240;">${esc(a.status)}</span>
+                </div>
+                <div style="display:flex;gap:8px;">
+                  <button id="btnExport" class="sr-btn-secondary" style="flex:1;">Export PDF</button>
+                  <button id="btnPrint" class="sr-btn-secondary" style="flex:1;">Print</button>
+                </div>`}
             </div>
           </div>
         </div>
@@ -476,6 +613,14 @@
     </div>`;
   }
 
+  async function backToList() {
+    st.stage = 'list';
+    st.assessment = null;
+    render();
+    await loadList();
+    render();
+  }
+
   function wireReviewHandlers() {
     main.querySelectorAll('[data-hover-zone]').forEach((el) => {
       el.addEventListener('mouseenter', () => { if (st.editingId !== el.dataset.q) { st.hoveredId = el.dataset.q; refreshQuestion(el.dataset.q); } });
@@ -496,8 +641,16 @@
     if (btnSave) btnSave.onclick = () => finalize('Finalized');
     const btnDraft = document.getElementById('btnDraft');
     if (btnDraft) btnDraft.onclick = (e) => { e.preventDefault(); finalize('Draft'); };
+    const btnDeleteDraft = document.getElementById('btnDeleteDraft');
+    if (btnDeleteDraft) btnDeleteDraft.onclick = async (e) => {
+      e.preventDefault();
+      try { await api(`/assessments/${st.assessment.id}`, { method: 'DELETE' }); toast('Draft deleted'); await backToList(); }
+      catch (err) { errorToast(err); }
+    };
     const undoSave = document.getElementById('undoSave');
     if (undoSave) undoSave.onclick = (e) => { e.preventDefault(); st.saveState = null; renderReview(); };
+    const btnBackToList = document.getElementById('btnBackToList');
+    if (btnBackToList) btnBackToList.onclick = (e) => { e.preventDefault(); backToList(); };
     const btnPrint = document.getElementById('btnPrint');
     if (btnPrint) btnPrint.onclick = () => window.print();
     const btnExport = document.getElementById('btnExport');

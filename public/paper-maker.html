@@ -61,7 +61,7 @@
       if (!Object.keys(st.selectedChapters).length) {
         chapters.slice(0, 2).forEach((c) => (st.selectedChapters[c.name] = true));
       }
-      if (generatedBy) toast(generatedBy === 'gemini' ? 'Syllabus researched with AI and saved for this class' : 'Syllabus filled in offline — set GEMINI_API_KEY for a researched syllabus');
+      if (generatedBy) toast(generatedBy === 'gemini' ? 'Syllabus researched with AI and saved for this class' : 'Syllabus filled in from a standard template for this class');
     } catch (e) {
       errorToast(e);
       st.chapters = [];
@@ -334,7 +334,7 @@
       <div style="width:100%;display:flex;flex-direction:column;gap:18px;animation:rise .3s ease;">
         <div style="display:flex;align-items:center;gap:10px;background:#EDF1ED;border:1px solid #D6DFD6;border-radius:10px;padding:12px 16px;" class="sr-hide-print">
           <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="#6E8B6F" stroke-width="1.4"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="#6E8B6F" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-          <span style="font-size:13.5px;color:#3E5240;"><strong>Paper ready.</strong> ${st.cost} credits used · balance ${Math.round(st.balance).toLocaleString()}${st.generatedBy === 'offline' ? ' · offline mode (set GEMINI_API_KEY for AI-written questions)' : ''}</span>
+          <span style="font-size:13.5px;color:#3E5240;"><strong>Paper ready.</strong> ${st.cost} credits used · balance ${Math.round(st.balance).toLocaleString()}</span>
           <span style="flex:1;"></span>
           <a href="question-bank.html" style="font-size:13px;font-weight:600;color:#0F4C4F;">${questions.length} questions saved to Question Bank →</a>
         </div>

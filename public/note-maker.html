@@ -263,7 +263,7 @@
         }
       });
       refreshCreditChips(res.balance);
-      toast(`Notes generated${res.generatedBy === 'offline' ? ' (offline mode — set GEMINI_API_KEY for AI content)' : ''}`);
+      toast('Notes generated');
       await loadRecent();
       viewNote(res.material.id, res.material);
     } catch (e) {

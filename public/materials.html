@@ -119,7 +119,7 @@
       state.generating = false;
       materials = [res.material, ...materials];
       render();
-      toast(`${type} generated${res.generatedBy === 'offline' ? ' (offline mode — set GEMINI_API_KEY for AI content)' : ''}`);
+      toast(`${type} generated`);
     } catch (e) {
       state.generating = false;
       render();

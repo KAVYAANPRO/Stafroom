@@ -201,3 +201,15 @@ p.sr-subtitle { margin: 0; font-size: 14px; color: var(--sr-muted); }
   .sr-scroll { overflow: visible; }
   .sr-main { padding: 20px; }
 }
+
+/* The sidebar/topbar shell is shared across every page (mountShell) — hide it
+   on print/PDF export everywhere, not just on pages that remember to do it
+   themselves. Pages can still mark their own extra chrome with sr-hide-print. */
+@media print {
+  .sr-side, .sr-topbar, .sr-hide-print { display: none !important; }
+  #app { display: block !important; height: auto !important; overflow: visible !important; }
+  .sr-body { display: block !important; }
+  .sr-scroll { overflow: visible !important; height: auto !important; }
+  .sr-main { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+  .sr-print-area { box-shadow: none !important; border: none !important; padding: 0 !important; }
+}

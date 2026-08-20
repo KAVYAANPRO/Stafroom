@@ -350,7 +350,7 @@ Return JSON: {"title":"...","body":"..."}
   return {
     title: title || `${concept || chapter} — ${kind.toLowerCase()}`,
     body:
-      `[Generated offline — set GEMINI_API_KEY for AI-written material.]\n\n` +
+      `[AI generation is temporarily unavailable — this is a placeholder.]\n\n` +
       `${kind} for ${board} Class ${grade} ${subject}\nChapter: ${chapter || concept}\n\n` +
       `Add your content here.`,
     generatedBy: 'offline'
@@ -388,7 +388,7 @@ Return JSON: {"title":"...","body":"..."}
   return {
     title: chapters.join(', '),
     body:
-      `[Generated offline — set GEMINI_API_KEY for AI-written notes.]\n\n` +
+      `[AI generation is temporarily unavailable — this is a placeholder.]\n\n` +
       `Notes for ${board} Class ${grade} ${subject}\nChapters: ${chapters.join('; ')}\n\n` +
       `Add your content here.`,
     generatedBy: 'offline'
@@ -460,7 +460,7 @@ The items array must have exactly ${items.length} entries, in order.`;
     items: items.map(() => ({
       awarded: 0,
       confidence: 0,
-      comment: 'Not evaluated — AI evaluation needs GEMINI_API_KEY. Mark manually.'
+      comment: 'Not evaluated — AI evaluation is temporarily unavailable. Mark manually.'
     })),
     generatedBy: 'offline'
   };

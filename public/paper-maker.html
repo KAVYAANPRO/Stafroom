@@ -11,6 +11,14 @@
   .ev-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #E4DECD; }
   .ev-row:last-child { border-bottom: none; }
   .ev-row:hover { background: #FBF9F2; }
+
+  @media (max-width: 860px) {
+    .pm-review-row { flex-direction: column; }
+    .pm-review-sidebar { width: 100% !important; position: static !important; }
+    .sr-print-area { padding: 24px 18px !important; }
+    .pm-adv-row { flex-direction: column; align-items: flex-start !important; gap: 6px !important; }
+    .pm-adv-row > span { width: auto !important; }
+  }
 </style>
 </head>
 <body>
@@ -268,15 +276,15 @@
           </div>
           ${st.advOpen ? `
           <div style="display:flex;flex-direction:column;gap:14px;border-top:1px solid #E4DECD;margin-top:14px;padding-top:14px;">
-            <div style="display:flex;align-items:center;gap:12px;">
+            <div class="pm-adv-row" style="display:flex;align-items:center;gap:12px;">
               <span style="width:118px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Medium</span>
               <div class="sr-seg" id="mediumPicker">${['English', 'हिन्दी'].map((m) => `<button data-medium="${m}" class="${m === st.medium ? 'active' : ''}">${m}</button>`).join('')}</div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;">
+            <div class="pm-adv-row" style="display:flex;align-items:center;gap:12px;">
               <span style="width:118px;flex-shrink:0;font-size:12.5px;color:#6E675C;">Difficulty</span>
               <div class="sr-seg" id="diffPicker">${['Gentle', 'Balanced', 'Challenge'].map((d) => `<button data-diff="${d}" class="${d === st.difficulty ? 'active' : ''}">${d}</button>`).join('')}</div>
             </div>
-            <div style="display:flex;align-items:flex-start;gap:12px;">
+            <div class="pm-adv-row" style="display:flex;align-items:flex-start;gap:12px;">
               <span style="width:118px;flex-shrink:0;font-size:12.5px;color:#6E675C;padding-top:9px;">Instructions</span>
               <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
                 <input type="text" id="instrInput" value="${esc(st.instrDraft)}" placeholder="e.g. Include one numerical on the mirror formula — press Enter to add" style="flex:1;border:1px solid #DCD5C3;border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;color:#2B2B2B;background:#FBF9F2;outline:none;">
@@ -462,7 +470,7 @@
           <span style="flex:1;"></span>
           <a href="question-bank.html" style="font-size:13px;font-weight:600;color:#0F4C4F;">${questions.length} questions saved to Question Bank →</a>
         </div>
-        <div style="display:flex;gap:22px;align-items:flex-start;">
+        <div class="pm-review-row" style="display:flex;gap:22px;align-items:flex-start;">
           <article class="sr-print-area" style="flex:1;min-width:0;background:#FFFFFF;border:1px solid #DCD5C3;border-radius:6px;box-shadow:0 1px 3px rgba(15,76,79,0.06);padding:44px 48px;font-family:'Source Serif 4','Noto Serif Devanagari',serif;color:#232323;line-height:1.65;">
             <div style="display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;">
               <span style="font-size:15px;font-weight:700;letter-spacing:0.04em;">${esc(pHeader.school)}</span>
@@ -492,7 +500,7 @@
             <div style="text-align:center;font-size:12px;letter-spacing:0.06em;color:#8A8272;margin-top:28px;">${esc(pHeader.end)}</div>
           </article>
 
-          <div class="sr-hide-print" style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;">
+          <div class="sr-hide-print pm-review-sidebar" style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;">
             <div class="sr-card" style="padding:16px;display:flex;flex-direction:column;gap:11px;">
               <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">PAPER CHECKS</span>
               <div style="display:flex;gap:9px;align-items:center;font-size:13px;color:#2B2B2B;">

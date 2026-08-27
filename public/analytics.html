@@ -6,6 +6,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+  @media (max-width: 700px) {
+    .an-topic-row { gap: 8px !important; }
+    .an-topic-row > span:first-child { width: 110px !important; font-size: 12px !important; }
+  }
+</style>
 </head>
 <body>
 <div id="app"></div>
@@ -105,7 +111,7 @@
           <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">TOPIC STRENGTH &amp; WEAKNESS</span>
           <div class="sr-card" style="padding:16px 18px;display:flex;flex-direction:column;gap:11px;">
             ${d.topics.length ? d.topics.map((t) => `
-              <div style="display:flex;align-items:center;gap:12px;">
+              <div class="an-topic-row" style="display:flex;align-items:center;gap:12px;">
                 <span style="width:190px;flex-shrink:0;font-size:13px;color:#2B2B2B;">${esc(t.name)}</span>
                 <div style="flex:1;height:8px;border-radius:99px;background:#E4DECD;overflow:hidden;"><div style="height:8px;border-radius:99px;background:${t.pct >= 65 ? '#6E8B6F' : '#C1654B'};width:${t.pct}%;"></div></div>
                 <span style="width:38px;text-align:right;font-size:12.5px;font-weight:600;color:#2B2B2B;">${t.pct}%</span>
@@ -115,13 +121,13 @@
 
         <section style="display:flex;flex-direction:column;gap:10px;">
           <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">ASSESSMENT COMPARISON</span>
-          <div class="sr-card" style="overflow:hidden;">
+          <div class="sr-card sr-table-scroll" style="overflow:hidden;">
             <div style="display:flex;padding:10px 16px;font-size:11.5px;font-weight:600;color:#8A8272;border-bottom:1px solid #E4DECD;">
-              <span style="flex:1;">Assessment</span><span style="width:90px;">Date</span><span style="width:70px;text-align:right;">Average</span><span style="width:70px;text-align:right;">High</span><span style="width:70px;text-align:right;">Low</span>
+              <span style="flex:1;min-width:140px;">Assessment</span><span style="width:90px;">Date</span><span style="width:70px;text-align:right;">Average</span><span style="width:70px;text-align:right;">High</span><span style="width:70px;text-align:right;">Low</span>
             </div>
             ${d.assessments.length ? d.assessments.map((a) => `
               <div style="display:flex;padding:11px 16px;font-size:13px;color:#2B2B2B;border-bottom:1px solid #E4DECD;">
-                <span style="flex:1;font-weight:500;">${esc(a.title)}</span><span style="width:90px;color:#8A8272;">${fmtDate(a.date)}</span><span style="width:70px;text-align:right;font-weight:600;">${a.avg}%</span><span style="width:70px;text-align:right;color:#8A8272;">${a.high}%</span><span style="width:70px;text-align:right;color:#8A8272;">${a.low}%</span>
+                <span style="flex:1;min-width:140px;font-weight:500;">${esc(a.title)}</span><span style="width:90px;color:#8A8272;">${fmtDate(a.date)}</span><span style="width:70px;text-align:right;font-weight:600;">${a.avg}%</span><span style="width:70px;text-align:right;color:#8A8272;">${a.high}%</span><span style="width:70px;text-align:right;color:#8A8272;">${a.low}%</span>
               </div>`).join('') : `<div style="padding:16px;font-size:13px;color:#8A8272;">No evaluated assessments yet.</div>`}
           </div>
         </section>` : `<div class="sr-loading">Loading…</div>`}
@@ -135,7 +141,7 @@
     if (!students.length) { body.innerHTML = `<div class="sr-card" style="padding:24px;text-align:center;color:#8A8272;">No students on record yet.</div>`; return; }
     const d = studentData;
     body.innerHTML = `
-      <div style="display:grid;grid-template-columns:240px 1fr;gap:20px;align-items:start;">
+      <div class="sr-grid-collapse" style="display:grid;grid-template-columns:240px 1fr;gap:20px;align-items:start;">
         <div class="sr-card" style="padding:8px;display:flex;flex-direction:column;gap:2px;">
           ${students.map((s) => `
             <button data-stu="${s.id}" style="display:flex;justify-content:space-between;align-items:center;padding:9px 11px;border-radius:7px;border:none;font-family:inherit;font-size:13px;cursor:pointer;text-align:left;${state.studentId === s.id ? 'background:#E6EFEE;color:#0F4C4F;font-weight:600;' : 'background:transparent;color:#4A4437;'}">

@@ -14,6 +14,10 @@
   .ev-row:last-child { border-bottom: none; }
   .ev-row:hover { background: #FBF9F2; cursor: pointer; }
   .ev-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; }
+
+  @media (max-width: 480px) {
+    .ev-queue-filename { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -107,7 +111,7 @@
 
       <section class="sr-card" style="padding:20px 22px;display:flex;flex-direction:column;gap:16px;">
         <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">1. CLASS &amp; PAPER</span>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="sr-grid-collapse" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="sr-field">
             <span class="label">Class</span>
             <select id="evClass">
@@ -151,9 +155,9 @@
           <span style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:#8A8272;">UNCHECKED (${state.uploadQueue.filter((q) => q.status === 'pending').length})</span>
           <div class="sr-card" style="overflow:hidden;">
             ${state.uploadQueue.map((q) => `
-              <div class="ev-row" style="cursor:default;">
-                <input type="text" data-queue-name="${q.localId}" value="${esc(q.studentName)}" placeholder="Student name" style="flex:1;border:1px solid #DCD5C3;border-radius:6px;padding:6px 9px;font-size:13px;font-family:inherit;" ${q.status !== 'pending' ? 'disabled' : ''}>
-                <span style="font-size:12px;color:#8A8272;flex-shrink:0;">${esc(q.file.name)}</span>
+              <div class="ev-row ev-queue-row" style="cursor:default;">
+                <input type="text" data-queue-name="${q.localId}" value="${esc(q.studentName)}" placeholder="Student name" style="flex:1;min-width:0;border:1px solid #DCD5C3;border-radius:6px;padding:6px 9px;font-size:13px;font-family:inherit;" ${q.status !== 'pending' ? 'disabled' : ''}>
+                <span class="ev-queue-filename" style="font-size:12px;color:#8A8272;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">${esc(q.file.name)}</span>
                 <span class="ev-status" style="background:${statusColor(q.status)[0]};color:${statusColor(q.status)[1]};">${statusLabel(q.status)}</span>
                 ${q.status === 'pending' ? `<button data-queue-remove="${q.localId}" style="background:none;border:none;color:#A2593F;cursor:pointer;font-size:14px;flex-shrink:0;">✕</button>` : ''}
               </div>`).join('')}

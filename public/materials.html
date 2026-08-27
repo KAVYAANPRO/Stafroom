@@ -51,7 +51,7 @@
         <span style="font-size:13.5px;color:#2B2B2B;">Generating ${state.generatingType} — this'll appear below in a moment…</span>
       </div>` : ''}
 
-      <div id="matGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
+      <div id="matGrid" class="sr-grid-collapse" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
     `;
 
     document.getElementById('btnNew').onclick = () => { state.pickerOpen = !state.pickerOpen; render(); };
@@ -64,7 +64,7 @@
   function renderGrid() {
     const grid = document.getElementById('matGrid');
     if (!materials.length) {
-      grid.outerHTML = `<div id="matGrid"><div class="sr-card" style="text-align:center;padding:40px 0;color:#8A8272;font-size:13.5px;grid-column:1/-1;">No materials of this type yet.</div></div>`;
+      grid.outerHTML = `<div id="matGrid" class="sr-grid-collapse"><div class="sr-card" style="text-align:center;padding:40px 0;color:#8A8272;font-size:13.5px;grid-column:1/-1;">No materials of this type yet.</div></div>`;
       return;
     }
     grid.innerHTML = materials.map((m) => `

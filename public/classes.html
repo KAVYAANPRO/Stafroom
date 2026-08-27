@@ -6,6 +6,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+  @media (max-width: 640px) {
+    .cls-row { flex-wrap: wrap; }
+    .cls-row-trend { align-items: flex-start !important; margin-left: 60px; }
+  }
+</style>
 </head>
 <body>
 <div id="app"></div>
@@ -40,7 +46,7 @@
       ${addFormOpen ? `
       <div class="sr-card" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;animation:rise .2s ease;">
         <span style="font-size:13.5px;font-weight:600;color:#2B2B2B;">New class</span>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;">
+        <div class="sr-grid-collapse" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;">
           <div class="sr-field"><span class="label">Board</span>
             <select id="dBoard"><option ${draft.board==='CBSE'?'selected':''}>CBSE</option><option ${draft.board==='ICSE'?'selected':''}>ICSE</option><option ${draft.board==='GSEB'?'selected':''}>GSEB</option></select>
           </div>
@@ -78,13 +84,13 @@
     const keyFontSize = c.key.length > 5 ? '10px' : c.key.length > 3 ? '12.5px' : '15px';
     return `
     <div class="sr-card" style="overflow:hidden;">
-      <div data-toggle="${c.id}" style="display:flex;align-items:center;gap:16px;padding:18px 20px;cursor:pointer;">
+      <div class="cls-row" data-toggle="${c.id}" style="display:flex;align-items:center;gap:16px;padding:18px 20px;cursor:pointer;">
         <div style="width:44px;height:44px;border-radius:10px;background:#EFEADD;color:#0F4C4F;font-family:'Source Serif 4',serif;font-size:${keyFontSize};font-weight:700;line-height:1.1;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;padding:2px;flex-shrink:0;">${esc(c.key)}</div>
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
           <span style="font-size:15px;font-weight:600;color:#2B2B2B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.board)} · Class ${esc(c.grade)} · ${esc(c.subject)}</span>
           <span style="font-size:12.5px;color:#8A8272;">${c.students} students · Syllabus ${esc(c.syllabus)}</span>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+        <div class="cls-row-trend" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
           <span style="font-size:14px;font-weight:600;color:${trendColor};">${c.avg || '—'} avg${c.trend ? ' · ' + c.trend : ''}</span>
           <span style="font-size:12px;color:#8A8272;">${c.next ? esc(c.next) : 'No assessments yet'}</span>
         </div>
@@ -93,7 +99,7 @@
       </div>
       ${isExp ? `
       <div style="border-top:1px solid #E4DECD;padding:16px 20px 20px 20px;display:flex;flex-direction:column;gap:16px;animation:rise .2s ease;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="sr-grid-collapse" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
           <div style="display:flex;flex-direction:column;gap:8px;">
             <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#8A8272;">RECENT ASSESSMENTS</span>
             ${c.recent.length ? c.recent.map((r) => `<div style="display:flex;justify-content:space-between;font-size:13px;color:#2B2B2B;"><span>${esc(r.title)}</span><span style="color:#8A8272;">${esc(r.status)}</span></div>`).join('') : '<span style="font-size:13px;color:#8A8272;">None yet.</span>'}

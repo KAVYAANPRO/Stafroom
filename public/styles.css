@@ -193,13 +193,45 @@ p.sr-subtitle { margin: 0; font-size: 14px; color: var(--sr-muted); }
   background: var(--sr-input-bg); outline: none;
 }
 
+/* Grid layouts built inline (dashboard's 2-column body, classes' 4-column
+   add-class form, analytics' 240px sidebar, etc.) can't be reflowed by a
+   plain media query since inline `style` wins over any CSS rule of equal
+   specificity — so pages that opt in mark the container `sr-grid-collapse`
+   and this overrides it with !important. */
+.sr-grid-collapse { }
+
+/* Fixed-width column rows (assessment comparison tables, usage history,
+   question bank list) don't reflow well on narrow screens — scroll them
+   horizontally instead of crushing every column down to nothing. */
+.sr-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sr-table-scroll > div { min-width: max-content; }
+
 @media (max-width: 860px) {
   #app { flex-direction: column; height: auto; overflow: visible; }
   .sr-side { width: 100% !important; flex-direction: row; flex-wrap: wrap; }
   .sr-side .sr-account, .sr-side > div[style*="flex:1"] { display: none; }
   .sr-side.collapsed .sr-nav-link span { display: inline; }
+  .sr-nav-link { padding: 10px 12px; }
   .sr-scroll { overflow: visible; }
-  .sr-main { padding: 20px; }
+  .sr-main { padding: 16px; gap: 16px; }
+  .sr-grid-collapse { grid-template-columns: 1fr !important; }
+  .sr-modal { width: calc(100vw - 32px); }
+  h1.sr-title, h1.sr-title.lg { font-size: 21px; }
+  .sr-topbar { padding: 0 14px; gap: 8px; }
+  .sr-topbar-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .sr-topbar-right { gap: 8px; flex-shrink: 0; }
+  .sr-credit-pill span:last-child { white-space: nowrap; }
+  .sr-credit-pill { padding: 5px 9px; }
+
+  /* Comfortable tap targets on touch screens without changing desktop's
+     denser button sizing. */
+  .sr-btn-primary, .sr-btn-secondary, .sr-chip, .sr-seg button, .sr-dropdown-item { min-height: 40px; }
+  .sr-nav-link { min-height: 42px; }
+  button, a.sr-card, .sr-avatar-btn { touch-action: manipulation; }
+}
+
+@media (max-width: 480px) {
+  .sr-account-sub { display: none; }
 }
 
 /* The sidebar/topbar shell is shared across every page (mountShell) — hide it

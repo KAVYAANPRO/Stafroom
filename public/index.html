@@ -14,99 +14,6 @@
     .ix-hero { padding: 40px 18px 44px 18px !important; gap: 32px !important; }
     .ix-hero h1 { font-size: 34px !important; }
     section { padding-left: 18px !important; padding-right: 18px !important; }
-    .ix-book { display: none !important; }
-  }
-
-  .ix-book {
-    position: absolute;
-    bottom: -30px;
-    left: -34px;
-    width: 150px;
-    height: 106px;
-    z-index: 0;
-    pointer-events: none;
-    perspective: 700px;
-  }
-  .ix-book-page {
-    position: absolute;
-    top: 0;
-    width: 75px;
-    height: 106px;
-    background: linear-gradient(180deg, #FBF8F0, #F2EDDD);
-    border: 1px solid #DCD5C3;
-    box-shadow: 0 12px 24px rgba(15,76,79,0.16);
-    background-image: repeating-linear-gradient(180deg, transparent 0 12px, rgba(15,76,79,0.09) 12px 13px);
-    background-position: 14px 18px;
-    background-repeat: no-repeat;
-    background-size: 46px 62px;
-  }
-  .ix-book-page-left { left: 0; border-radius: 6px 2px 2px 6px; transform: rotateY(3deg); transform-origin: right center; }
-  .ix-book-page-right { right: 0; border-radius: 2px 6px 6px 2px; transform: rotateY(-3deg); transform-origin: left center; }
-  .ix-book-spine {
-    position: absolute;
-    left: 50%;
-    top: -5px;
-    width: 10px;
-    height: 116px;
-    margin-left: -5px;
-    background: linear-gradient(180deg, #0F4C4F, #0B3638);
-    border-radius: 3px;
-    box-shadow: 0 8px 16px rgba(15,76,79,0.28);
-    z-index: 2;
-  }
-  .ix-book-flip {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    width: 75px;
-    height: 106px;
-    transform-style: preserve-3d;
-    transform-origin: left center;
-    z-index: 3;
-    animation: ixBookFlip 8s ease-in-out infinite;
-  }
-  .ix-book-flip-front, .ix-book-flip-back {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    backface-visibility: hidden;
-    border-radius: 2px 6px 6px 2px;
-    box-shadow: 0 6px 14px rgba(15,76,79,0.18);
-  }
-  .ix-book-flip-front {
-    background: linear-gradient(180deg, #FBF8F0, #F2EDDD);
-    border: 1px solid #DCD5C3;
-    background-image: repeating-linear-gradient(180deg, transparent 0 12px, rgba(15,76,79,0.09) 12px 13px);
-    background-position: 14px 18px;
-    background-repeat: no-repeat;
-    background-size: 46px 62px;
-  }
-  .ix-book-flip-back {
-    background: linear-gradient(180deg, #EFEADD, #E4DECD);
-    border: 1px solid #DCD5C3;
-    transform: rotateY(180deg);
-  }
-  .ix-book-ribbon {
-    position: absolute;
-    top: -7px;
-    right: 27px;
-    width: 8px;
-    height: 40px;
-    background: #C6922E;
-    border-radius: 0 0 3px 3px;
-    z-index: 4;
-    box-shadow: 0 4px 8px rgba(198,146,46,0.32);
-  }
-  @keyframes ixBookFlip {
-    0%, 50% { transform: rotateY(0deg); }
-    62% { transform: rotateY(-170deg); }
-    82% { transform: rotateY(-170deg); }
-    94%, 100% { transform: rotateY(0deg); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .ix-book-flip { animation: none; }
   }
 </style>
 </head>
@@ -140,18 +47,7 @@
       <span style="font-size:13px;color:#8A8272;">No credit card required · Free plan includes Paper Maker &amp; Quiz Maker</span>
     </div>
 
-    <div style="position:relative;">
-      <div class="ix-book" aria-hidden="true">
-        <div class="ix-book-page ix-book-page-left"></div>
-        <div class="ix-book-page ix-book-page-right"></div>
-        <div class="ix-book-spine"></div>
-        <div class="ix-book-flip">
-          <div class="ix-book-flip-front"></div>
-          <div class="ix-book-flip-back"></div>
-        </div>
-        <div class="ix-book-ribbon"></div>
-      </div>
-      <div style="position:relative;z-index:1;background:#FFFFFF;border:1px solid #DCD5C3;border-radius:14px;box-shadow:0 20px 50px rgba(15,76,79,0.10);overflow:hidden;">
+    <div style="background:#FFFFFF;border:1px solid #DCD5C3;border-radius:14px;box-shadow:0 20px 50px rgba(15,76,79,0.10);overflow:hidden;">
         <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #E4DECD;">
           <span style="width:9px;height:9px;border-radius:99px;background:#DCD5C3;"></span>
           <span style="width:9px;height:9px;border-radius:99px;background:#DCD5C3;"></span>
@@ -181,7 +77,6 @@
           </div>
         </div>
       </div>
-    </div>
   </section>
 
   <section id="loop" style="background:#FFFFFF;border-top:1px solid #E1DBC9;border-bottom:1px solid #E1DBC9;padding:64px 32px;">

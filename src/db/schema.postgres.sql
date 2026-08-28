@@ -361,3 +361,114 @@ begin
   return v_profile;
 end;
 $$ language plpgsql security definer set search_path = public;
+
+-- =============================================================================
+-- MIGRATION (2026-08-28): grace overage on credit spending
+-- -----------------------------------------------------------------------------
+-- NOT applied automatically — this repo has no DB connection/credentials to
+-- run it against Supabase. Paste this block into the Supabase SQL Editor
+-- (Project -> SQL Editor -> New query -> paste -> Run) once, manually.
+--
+-- Both functions below use `create or replace`, so they simply supersede the
+-- spend_credits / apply_monthly_reset definitions further up this file —
+-- running the whole file top-to-bottom (e.g. on a fresh install) is safe
+-- too, since this block runs last and wins.
+--
+-- What this changes: today spend_credits hard-blocks any spend that would
+-- take the balance below zero, and both apply_monthly_reset and
+-- applyPlanSwitch (src/routes/billing.js) blindly SET credits to the new
+-- plan's allowance, wiping out any balance that was there. This migration:
+--
+--   1. Lets spend_credits allow a small "grace overage" — the balance may go
+--      negative, like Claude/OpenAI usage-based overage, but only down to
+--      -1 * greatest(p_amount, 20) (at most one action's worth of debt,
+--      floored at -20 so a cheap action can't be chained into a big hole).
+--      Only a spend that would cross that floor still raises
+--      INSUFFICIENT_CREDITS.
+--   2. Makes apply_monthly_reset settle a negative balance against the
+--      fresh monthly allowance instead of overwriting it: new_balance =
+--      greatest(plan_credits + old_credits, 0) when old_credits < 0 (old
+--      debt is subtracted from the refill), otherwise the refill is applied
+--      as before.
+--
+-- The equivalent settle-instead-of-overwrite fix for plan switches lives in
+-- application code (applyPlanSwitch in src/routes/billing.js), since that
+-- path is a plain Supabase `.update()`, not an RPC — it isn't part of this
+-- SQL migration. grant_credits (top-ups) needed NO change: it already does
+-- `credits + p_amount`, so a top-up added to a negative balance naturally
+-- pays the debt down (or off) as part of the same addition.
+--
+-- Scope/honesty note: there is no Razorpay auto-charge or subscription-
+-- mandate wiring in this codebase, so "billed with the next payment" here
+-- means the debt is deducted from the next monthly allowance refill or the
+-- next top-up purchase — NOT an automatic real-money charge taken from the
+-- teacher without them acting.
+-- =============================================================================
+
+create or replace function spend_credits(p_amount numeric, p_action text, p_detail text default '')
+returns table(balance numeric, spent numeric) as $$
+declare
+  v_credits numeric;
+  v_balance numeric;
+  v_floor numeric;
+begin
+  if p_amount < 0 then
+    raise exception 'INVALID_AMOUNT';
+  end if;
+  select credits into v_credits from profiles where id = auth.uid() for update;
+  if v_credits is null then
+    raise exception 'UNKNOWN_USER';
+  end if;
+  -- Grace overage floor: allow the balance to dip into the red by at most
+  -- one action's cost, never lower than -20 credits. A teacher with 3
+  -- credits left triggering a 6-credit paper goes to -3 and the action
+  -- still goes through; someone already sitting at/near the floor gets
+  -- blocked once the next spend would cross it.
+  v_floor := -1 * greatest(p_amount, 20);
+  v_balance := round(v_credits - p_amount, 2);
+  if v_balance < v_floor then
+    raise exception 'INSUFFICIENT_CREDITS:%:%', p_amount, v_credits;
+  end if;
+  update profiles set credits = v_balance where id = auth.uid();
+  if p_amount > 0 then
+    insert into credit_ledger (user_id, action, detail, delta, balance_after)
+    values (auth.uid(), p_action, p_detail, -p_amount, v_balance);
+  end if;
+  return query select v_balance, p_amount;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create or replace function apply_monthly_reset()
+returns profiles as $$
+declare
+  v_profile profiles;
+  v_plan_credits numeric;
+  v_next timestamptz;
+  v_old_credits numeric;
+  v_new_balance numeric;
+begin
+  select * into v_profile from profiles where id = auth.uid() for update;
+  if v_profile.credits_reset_on is null or v_profile.credits_reset_on > now() then
+    return v_profile;
+  end if;
+  v_old_credits := v_profile.credits;
+  v_plan_credits := case v_profile.plan when 'Pro' then 600 when 'Max' then 2500 else 100 end;
+  v_next := date_trunc('month', now()) + interval '1 month';
+  -- Settle grace-overage debt out of the fresh allowance instead of wiping
+  -- it: a negative old balance is debt owed, so it's subtracted from the
+  -- new allowance (floored at 0 — debt never carries across two resets).
+  v_new_balance := case when v_old_credits < 0 then greatest(v_plan_credits + v_old_credits, 0) else v_plan_credits end;
+  update profiles set credits = v_new_balance, allowance = v_plan_credits, credits_reset_on = v_next
+    where id = auth.uid() returning * into v_profile;
+  insert into credit_ledger (user_id, action, detail, delta, balance_after)
+  values (
+    auth.uid(), 'Monthly allowance',
+    case when v_old_credits < 0
+      then v_profile.plan || ' plan refill (settled ' || (-v_old_credits) || ' overage debt)'
+      else v_profile.plan || ' plan refill'
+    end,
+    v_new_balance - v_old_credits, v_new_balance
+  );
+  return v_profile;
+end;
+$$ language plpgsql security definer set search_path = public;

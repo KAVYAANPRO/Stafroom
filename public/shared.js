@@ -270,6 +270,64 @@ async function mountShell(activeKey, title) {
   return { user, main: document.getElementById('sr-main') };
 }
 
+/* --------------------------------------------------------------- modals */
+
+/** Minimal shared confirm modal, matching the .sr-modal-backdrop/.sr-modal
+ * pattern used by credits.html/note-maker.html/materials.html's own inline
+ * openModal helpers. Kept separate (srModal id) so it never collides with a
+ * page's own openModal-based dialog. */
+function openConfirmModal(inner) {
+  document.getElementById('srConfirmModal')?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sr-modal-backdrop';
+  backdrop.id = 'srConfirmModal';
+  backdrop.innerHTML = `<div class="sr-modal">${inner}</div>`;
+  document.body.appendChild(backdrop);
+  return backdrop;
+}
+function closeConfirmModal() { document.getElementById('srConfirmModal')?.remove(); }
+
+function fmtCredits(n) {
+  const v = Math.round(Number(n) * 100) / 100;
+  return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, '');
+}
+
+/**
+ * Warns the teacher before an action pushes their balance into overage
+ * (negative — settled from their next monthly refill or top-up, see
+ * spend_credits in schema.postgres.sql). Resolves true to proceed, false to
+ * cancel. If `cost <= balance` there's nothing to warn about, so it
+ * resolves true immediately with no dialog — the common case stays friction-free.
+ *
+ * @param {number} cost - credits this action will spend
+ * @param {string} label - short description, e.g. "Generating this paper"
+ * @param {number} [balance] - current balance; fetched from /billing when omitted
+ */
+async function confirmIfOverage(cost, label, balance) {
+  if (balance === undefined || balance === null) {
+    try { ({ balance } = await api('/billing')); } catch { return true; } // fail open — don't block on a network hiccup
+  }
+  if (!(cost > balance)) return true;
+  const overage = fmtCredits(cost - balance);
+  return new Promise((resolve) => {
+    const backdrop = openConfirmModal(`
+      <span style="font-family:'Source Serif 4',serif;font-size:19px;font-weight:600;color:#0F4C4F;">Low on credits</span>
+      <p style="margin:0;font-size:13px;color:#6E675C;line-height:1.55;">
+        ${esc(label)} will use ${fmtCredits(cost)} credits but you only have ${fmtCredits(balance)} left.
+        The extra ${overage} credits will put your balance into overage — they'll be deducted from your next credit refill or top-up.
+      </p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="srOverageCancel" class="sr-btn-secondary">Cancel</button>
+        <button id="srOverageContinue" class="sr-btn-primary">Continue anyway</button>
+      </div>
+    `);
+    const finish = (result) => { closeConfirmModal(); resolve(result); };
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) finish(false); });
+    document.getElementById('srOverageCancel').onclick = () => finish(false);
+    document.getElementById('srOverageContinue').onclick = () => finish(true);
+  });
+}
+
 function refreshCreditChips(balance) {
   document.querySelectorAll('.sr-credit-pill span:last-child').forEach((el) => (el.textContent = `${Math.round(balance).toLocaleString()} credits`));
   document.querySelectorAll('.sr-credit-badge').forEach((el) => (el.textContent = Math.round(balance).toLocaleString()));

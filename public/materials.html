@@ -12,11 +12,13 @@
 <script src="shared.js"></script>
 <script>
 (async () => {
-  const { main } = await mountShell('materials', 'Materials');
+  const { user, main } = await mountShell('materials', 'Materials');
   main.classList.add('wide');
 
   const state = { filter: 'All', pickerOpen: false, generating: false, generatingType: '' };
   let materials = [];
+  let actionCosts = {};
+  try { ({ actionCosts } = await api('/billing/pricing')); } catch { /* cost check falls back to 0 — never blocks generation */ }
 
   async function load() {
     const res = await api('/materials' + (state.filter !== 'All' ? `?type=${encodeURIComponent(state.filter)}` : ''));
@@ -111,6 +113,9 @@
   }
 
   async function quickGenerate(type) {
+    const cost = actionCosts[`material_${type.toLowerCase()}`] ?? 2;
+    const ok = await confirmIfOverage(cost, `Generating this ${type.toLowerCase()}`, user.credits);
+    if (!ok) { state.pickerOpen = false; render(); return; }
     state.pickerOpen = false; state.generating = true; state.generatingType = type;
     render();
     try {

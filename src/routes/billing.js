@@ -40,8 +40,14 @@ function planPrice(plan, period) {
 
 async function applyPlanSwitch(req, plan, billingPeriod) {
   const meta = PLANS[plan];
+  // Settle any grace-overage debt out of the new plan's allowance instead of
+  // blindly overwriting it — a negative balance (see spend_credits in
+  // schema.postgres.sql) is debt owed, so it's subtracted from the fresh
+  // allowance rather than wiped. Mirrors apply_monthly_reset's migration.
+  const oldCredits = req.user.credits;
+  const newCredits = oldCredits < 0 ? Math.max(meta.credits + oldCredits, 0) : meta.credits;
   const [updated] = unwrap(await req.supabase.from('profiles').update({
-    plan, billing_period: billingPeriod, credits: meta.credits, allowance: meta.credits,
+    plan, billing_period: billingPeriod, credits: newCredits, allowance: meta.credits,
     credits_reset_on: nextResetDate()
   }).eq('id', req.user.id).select('*'));
   return updated;

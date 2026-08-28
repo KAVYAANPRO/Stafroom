@@ -307,6 +307,13 @@
   }
 
   async function evaluateAll() {
+    const pendingCount = state.uploadQueue.filter((q) => q.status === 'pending').length;
+    if (!pendingCount) return;
+    let actionCosts = {};
+    try { ({ actionCosts } = await api('/billing/pricing')); } catch { /* cost check falls back to 0 — never blocks evaluation */ }
+    const cost = (actionCosts.evaluate_sheet ?? 1.5) * pendingCount;
+    const ok = await confirmIfOverage(cost, `Evaluating ${pendingCount} sheet${pendingCount > 1 ? 's' : ''}`, user.credits);
+    if (!ok) return;
     state.evaluatingAll = true; render();
     for (const item of state.uploadQueue) {
       if (item.status !== 'pending') continue;

@@ -344,7 +344,10 @@
     main.querySelectorAll('[data-remove-instr]').forEach((el) => el.onclick = () => { st.customInstructions.splice(Number(el.dataset.removeInstr), 1); render(); });
 
     const btnGenerate = document.getElementById('btnGenerate');
-    if (!generateDisabled) btnGenerate.onclick = startGeneration;
+    if (!generateDisabled) btnGenerate.onclick = async () => {
+      const ok = await confirmIfOverage(bp.cost || 0, 'Generating this paper', user.credits);
+      if (ok) startGeneration();
+    };
   }
 
   /* ---------------------------------------------------------- generating */

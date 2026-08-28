@@ -251,6 +251,8 @@
   async function generate() {
     const chapters = selectedChapterNames();
     if (!chapters.length || !state.classId) return;
+    const ok = await confirmIfOverage(Number(estCost()), 'Generating these notes', user.credits);
+    if (!ok) return;
     state.generating = true; render();
     try {
       const res = await api('/note-maker/generate', {

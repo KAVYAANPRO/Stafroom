@@ -102,7 +102,15 @@ function round(n) {
   return Math.round(n * 100) / 100;
 }
 
-/** Deducts credits atomically. Throws 402 when the balance can't cover it. */
+/**
+ * Deducts credits atomically. Balances are allowed to go into a small
+ * "grace overage" (negative, floored at roughly -1 * greatest(cost, 20) —
+ * see spend_credits in schema.postgres.sql), so INSUFFICIENT_CREDITS no
+ * longer means "any negative balance" — it means "this spend would exceed
+ * the grace floor". Overage debt is settled out of the next monthly refill
+ * or top-up (apply_monthly_reset / applyPlanSwitch / grant_credits), not
+ * charged automatically — there's no payment-mandate infra for that here.
+ */
 export async function spend(supabase, amount, action, detail = '') {
   const value = round(Number(amount));
   if (!(value >= 0)) throw badRequest('Invalid credit amount');
